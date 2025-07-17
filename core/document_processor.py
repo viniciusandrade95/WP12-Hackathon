@@ -3,6 +3,7 @@
 Unified document processor that resolves all architectural inconsistencies
 """
 
+import json
 import time
 import pdfplumber
 from pathlib import Path
