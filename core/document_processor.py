@@ -1,12 +1,14 @@
+# core/unified_document_processor.py
 """
-Complete document processing orchestrator with industry intelligence
-core/document_processor.py
+Unified document processor that resolves all architectural inconsistencies
 """
 
 import time
 import pdfplumber
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
+from datetime import datetime
+
 from .industry_analyzer import IndustryIntelligentAnalyzer
 from .knowledge_base import GICSKnowledgeBase
 from .database import DatabaseManager
@@ -14,14 +16,14 @@ from utils.api_client import LLMClient
 
 class DocumentProcessor:
     """
-    Main document processing orchestrator with full industry intelligence
+    Unified document processor with resolved inconsistencies
     """
     
-    def __init__(self, api_key: str, base_url: str, db_manager: DatabaseManager):
+    def __init__(self, llm_client: LLMClient, db_manager: DatabaseManager):
+        self.llm_client = llm_client
         self.db_manager = db_manager
         self.industry_analyzer = IndustryIntelligentAnalyzer()
         self.knowledge_base = GICSKnowledgeBase()
-        self.llm_client = LLMClient(api_key, base_url)
         
         # Processing configuration
         self.MAX_PAGES_TO_PROCESS = 20
@@ -29,726 +31,764 @@ class DocumentProcessor:
         self.BATCH_SIZE = 4
         
         # Progress tracking
-        self.processing_progress = {"current": 0, "total": 0, "status": "idle"}
+        self.processing_progress = {}
         
     def process_document(self, pdf_path: str) -> Dict:
         """
-        Complete document processing pipeline with industry intelligence
+        Complete document processing pipeline with unified approach
         """
-        print(f"\n🚀 Starting Industry-Intelligent Document Processing...")
+        document_id = None
         start_time = time.time()
         
         try:
-            # Phase 1: Industry-intelligent structure analysis
-            print("🧠 Phase 1: Industry detection and structure analysis...")
-            industry_analysis = self.industry_analyzer.analyze_document_structure(pdf_path)
+            print(f"\n🚀 Starting Unified Document Processing...")
             
-            detected_industry = industry_analysis["detected_industry"]["industry"]
-            company_name = industry_analysis["company_name"]
-            
-            # Phase 2: Create industry-specific processing plan
-            print("🎯 Phase 2: Creating industry-specific processing plan...")
-            processing_plan = self._create_industry_processing_plan(industry_analysis)
-            
-            print(f"📋 Industry Processing Plan:")
-            print(f"  🏭 Industry: {detected_industry}")
-            print(f"  📄 Pages to process: {len(processing_plan['pages_to_process'])}")
-            print(f"  🎯 Target metrics: {len(processing_plan['target_metrics'])}")
-            print(f"  ⏱️  Estimated time: {processing_plan['estimated_time']:.1f} minutes")
-            
-            # Phase 3: Industry-aware extraction
-            print("🔍 Phase 3: Industry-aware metric extraction...")
-            results = self._process_pages_with_industry_intelligence(
-                pdf_path, processing_plan, self.MAX_PROCESSING_TIME, start_time
-            )
-            
-            total_time = time.time() - start_time
-            
-            # Phase 4: Business intelligence synthesis
-            print("🧠 Phase 4: Business intelligence synthesis...")
-            business_insights = self._generate_business_insights(results, detected_industry)
-            
-            # Phase 5: Store comprehensive results
-            document_id = self.db_manager.store_comprehensive_results(
-                pdf_path, industry_analysis, processing_plan, results, 
-                business_insights, total_time
-            )
-            
-            # Final results
-            final_results = {
-                "document_id": document_id,
-                "company_name": company_name,
-                "detected_industry": detected_industry,
-                "total_pages": industry_analysis["total_pages"],
-                "pages_processed": len(results.get("processed_pages", [])),
-                "universal_metrics_extracted": len([m for m in results.get("metrics", []) if m.get("metric_type") == "universal"]),
-                "industry_metrics_extracted": len([m for m in results.get("metrics", []) if m.get("metric_type") == "industry_specific"]),
-                "total_metrics_extracted": len(results.get("metrics", [])),
-                "business_insights": business_insights,
-                "processing_time": total_time,
-                "extraction_success_rate": results.get("extraction_success_rate", 0.0),
-                "completed": results.get("completed", False),
-                "success": True
+            # Initialize progress tracking
+            self.processing_progress[pdf_path] = {
+                "current": 0, 
+                "total": 100, 
+                "status": "initializing",
+                "message": "Starting analysis..."
             }
             
-            print(f"\n✅ Industry-Intelligent Processing Complete!")
-            print(f"  🏢 Company: {company_name}")
-            print(f"  🏭 Industry: {detected_industry}")
-            print(f"  ⏱️  Total time: {total_time:.1f}s")
-            print(f"  📊 Pages processed: {final_results['pages_processed']}/{final_results['total_pages']}")
-            print(f"  💰 Universal metrics: {final_results['universal_metrics_extracted']}")
-            print(f"  🎯 Industry metrics: {final_results['industry_metrics_extracted']}")
-            print(f"  🧠 Business insights: {len(business_insights)}")
+            # Phase 1: Document structure analysis
+            print("📋 Phase 1: Document structure analysis...")
+            self._update_progress(pdf_path, 10, "analyzing", "Analyzing document structure...")
             
+            structure_analysis = self._analyze_document_structure(pdf_path)
+            if not structure_analysis.get('success'):
+                return structure_analysis
+            
+            # Phase 2: Industry detection
+            print("🏭 Phase 2: Industry detection...")
+            self._update_progress(pdf_path, 25, "detecting", "Detecting industry type...")
+            
+            industry_analysis = self._detect_industry(structure_analysis)
+            
+            # Phase 3: Create company and document records
+            print("💾 Phase 3: Creating database records...")
+            self._update_progress(pdf_path, 35, "storing", "Creating database records...")
+            
+            document_id = self._create_document_record(pdf_path, structure_analysis, industry_analysis)
+            
+            # Phase 4: Create processing plan
+            print("📋 Phase 4: Creating processing plan...")
+            self._update_progress(pdf_path, 45, "planning", "Creating extraction plan...")
+            
+            processing_plan = self._create_processing_plan(document_id, structure_analysis, industry_analysis)
+            
+            # Phase 5: Extract metrics
+            print("🔍 Phase 5: Extracting metrics...")
+            self._update_progress(pdf_path, 55, "extracting", "Extracting financial metrics...")
+            
+            extraction_results = self._extract_metrics(pdf_path, document_id, processing_plan)
+            
+            # Phase 6: Generate insights
+            print("🧠 Phase 6: Generating business insights...")
+            self._update_progress(pdf_path, 85, "analyzing", "Generating business insights...")
+            
+            insights = self._generate_insights(document_id, extraction_results, industry_analysis)
+            
+            # Phase 7: Finalize processing
+            print("✅ Phase 7: Finalizing...")
+            self._update_progress(pdf_path, 95, "finalizing", "Finalizing analysis...")
+            
+            final_results = self._finalize_processing(document_id, extraction_results, insights, start_time)
+            
+            self._update_progress(pdf_path, 100, "completed", "Analysis complete!")
+            
+            print(f"✅ Processing completed successfully in {time.time() - start_time:.1f}s")
             return final_results
             
         except Exception as e:
-            print(f"❌ Error during document processing: {e}")
+            print(f"❌ Processing failed: {str(e)}")
+            
+            # Update document status if we have document_id
+            if document_id:
+                self._update_document_status(document_id, "failed", str(e))
+            
+            self._update_progress(pdf_path, 0, "failed", f"Processing failed: {str(e)}")
+            
             return {
-                "success": False,
-                "error": str(e),
-                "processing_time": time.time() - start_time
+                'success': False,
+                'error': str(e),
+                'document_id': document_id,
+                'processing_time': time.time() - start_time
             }
     
-    def _create_industry_processing_plan(self, industry_analysis: Dict) -> Dict:
-        """
-        Create comprehensive processing plan based on industry analysis
-        """
-        detected_industry = industry_analysis["detected_industry"]["industry"]
-        layout_analysis = industry_analysis["layout_analysis"]
-        total_pages = industry_analysis["total_pages"]
+    def _analyze_document_structure(self, pdf_path: str) -> Dict:
+        """Analyze document structure with error handling"""
+        try:
+            with pdfplumber.open(pdf_path) as pdf:
+                total_pages = len(pdf.pages)
+                
+                if total_pages == 0:
+                    return {'success': False, 'error': 'PDF contains no pages'}
+                
+                # Extract sample text from first few pages
+                sample_text = ""
+                for i in range(min(5, total_pages)):
+                    try:
+                        page_text = pdf.pages[i].extract_text() or ""
+                        sample_text += page_text + " "
+                    except Exception as e:
+                        print(f"    ⚠️ Error extracting text from page {i+1}: {e}")
+                        continue
+                
+                if len(sample_text.strip()) < 100:
+                    return {'success': False, 'error': 'PDF contains insufficient text content'}
+                
+                # Extract company name
+                company_name = self._extract_company_name(sample_text)
+                
+                return {
+                    'success': True,
+                    'total_pages': total_pages,
+                    'sample_text': sample_text[:3000],  # Limit sample size
+                    'company_name': company_name,
+                    'file_path': pdf_path
+                }
+                
+        except Exception as e:
+            return {'success': False, 'error': f'Failed to analyze PDF structure: {str(e)}'}
+    
+    def _detect_industry(self, structure_analysis: Dict) -> Dict:
+        """Detect industry with improved error handling"""
+        try:
+            sample_text = structure_analysis['sample_text']
+            company_name = structure_analysis['company_name']
+            
+            # Use knowledge base for industry detection
+            industry_result = self.knowledge_base.detect_industry(sample_text, company_name)
+            
+            # Get industry information
+            industry_info = self.knowledge_base.get_industry_info(industry_result['industry'])
+            
+            return {
+                'detected_industry': industry_result['industry'],
+                'confidence': industry_result['confidence'],
+                'scores': industry_result.get('scores', {}),
+                'industry_info': industry_info,
+                'target_metrics': self.knowledge_base.get_all_target_metrics(industry_result['industry'])
+            }
+            
+        except Exception as e:
+            # Fallback to 'other' industry
+            return {
+                'detected_industry': 'other',
+                'confidence': 0.0,
+                'scores': {},
+                'industry_info': {},
+                'target_metrics': list(self.knowledge_base.universal_metrics.keys())
+            }
+    
+    def _create_document_record(self, pdf_path: str, structure_analysis: Dict, industry_analysis: Dict) -> int:
+        """Create company and document records in database"""
+        cursor = self.db_manager.connection.cursor()
         
-        # Get target metrics for this industry
-        target_metrics = self.knowledge_base.get_critical_metrics(detected_industry)
-        all_metrics = self.knowledge_base.get_all_target_metrics(detected_industry)
+        try:
+            # Create or get company
+            company_name = structure_analysis['company_name']
+            detected_industry = industry_analysis['detected_industry']
+            industry_confidence = industry_analysis['confidence']
+            
+            # Check if company exists
+            cursor.execute("SELECT id FROM companies WHERE name = ?", (company_name,))
+            company_row = cursor.fetchone()
+            
+            if company_row:
+                company_id = company_row[0]
+                # Update industry information
+                cursor.execute("""
+                    UPDATE companies 
+                    SET detected_industry = ?, industry_confidence = ?, updated_at = ?
+                    WHERE id = ?
+                """, (detected_industry, industry_confidence, datetime.now(), company_id))
+            else:
+                # Create new company
+                cursor.execute("""
+                    INSERT INTO companies (name, detected_industry, industry_confidence)
+                    VALUES (?, ?, ?)
+                """, (company_name, detected_industry, industry_confidence))
+                company_id = cursor.lastrowid
+            
+            # Create document record
+            filename = Path(pdf_path).name
+            cursor.execute("""
+                INSERT INTO documents 
+                (company_id, filename, file_path, total_pages, status, processing_strategy)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                company_id, 
+                filename, 
+                pdf_path, 
+                structure_analysis['total_pages'], 
+                'processing',
+                f"unified_{detected_industry}"
+            ))
+            
+            document_id = cursor.lastrowid
+            
+            # Create industry analysis record
+            cursor.execute("""
+                INSERT INTO industry_analysis 
+                (document_id, detected_industry, industry_confidence, detection_scores, target_metrics)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                document_id,
+                detected_industry,
+                industry_confidence,
+                json.dumps(industry_analysis['scores']),
+                json.dumps(industry_analysis['target_metrics'])
+            ))
+            
+            self.db_manager.connection.commit()
+            
+            print(f"  📝 Created document record ID: {document_id}")
+            return document_id
+            
+        except Exception as e:
+            self.db_manager.connection.rollback()
+            raise Exception(f"Failed to create document record: {str(e)}")
+    
+    def _create_processing_plan(self, document_id: int, structure_analysis: Dict, industry_analysis: Dict) -> Dict:
+        """Create optimized processing plan"""
+        total_pages = structure_analysis['total_pages']
+        detected_industry = industry_analysis['detected_industry']
         
-        # Smart page selection based on industry and layout analysis
-        pages_to_process = self._select_industry_relevant_pages(industry_analysis)
+        # Smart page selection
+        pages_to_process = self._select_pages_to_process(total_pages, detected_industry)
         
-        # Determine processing strategy based on industry
-        if detected_industry in ["airlines", "banking", "technology"]:
-            strategy = "industry_focused"
-            batch_size = 3  # Smaller batches for focused extraction
-            estimated_time_per_page = 2.5  # More thorough processing
+        # Determine batch size based on industry complexity
+        if detected_industry in ['airlines', 'banking']:
+            batch_size = 3  # More complex industries need smaller batches
         else:
-            strategy = "comprehensive"
             batch_size = 4
-            estimated_time_per_page = 2.0
         
         return {
-            "detected_industry": detected_industry,
-            "target_metrics": all_metrics,
-            "critical_metrics": target_metrics,
-            "pages_to_process": pages_to_process,
-            "strategy": strategy,
-            "batch_size": batch_size,
-            "estimated_time": len(pages_to_process) * estimated_time_per_page / 60,  # Convert to minutes
-            "layout_analysis": layout_analysis
+            'document_id': document_id,
+            'pages_to_process': pages_to_process,
+            'batch_size': batch_size,
+            'detected_industry': detected_industry,
+            'target_metrics': industry_analysis['target_metrics'],
+            'estimated_time': len(pages_to_process) * 2.5  # seconds per page
         }
     
-    def _select_industry_relevant_pages(self, industry_analysis: Dict) -> List[int]:
-        """
-        Select pages most relevant to the detected industry
-        """
-        detected_industry = industry_analysis["detected_industry"]["industry"]
-        layout_analysis = industry_analysis["layout_analysis"]
-        total_pages = industry_analysis["total_pages"]
+    def _select_pages_to_process(self, total_pages: int, industry: str) -> List[int]:
+        """Select optimal pages for processing"""
+        if total_pages <= self.MAX_PAGES_TO_PROCESS:
+            return list(range(1, total_pages + 1))
         
+        # Strategic page selection
         selected_pages = []
         
-        # Priority 1: High-value pages identified by industry analysis
-        high_value_pages = layout_analysis.get("high_value_pages", [])
-        selected_pages.extend(high_value_pages[:8])
+        # Early pages (usually contain key metrics)
+        selected_pages.extend(range(1, min(8, total_pages + 1)))
         
-        # Priority 2: Financial pages with strong signals
-        financial_pages = layout_analysis.get("financial_pages", [])
-        selected_pages.extend([p for p in financial_pages[:6] if p not in selected_pages])
+        # Middle section (often contains detailed financials)
+        middle_start = max(8, total_pages // 3)
+        middle_end = min(middle_start + 6, total_pages + 1)
+        selected_pages.extend(range(middle_start, middle_end))
         
-        # Priority 3: Pages with industry-specific tables
-        layout_types = layout_analysis.get("layout_types", {})
-        if layout_types.get("industry_specific_table", 0) > 0:
-            # Add pages likely to contain industry-specific tables
-            for page_num in range(1, min(total_pages + 1, 50)):
-                if page_num not in selected_pages and len(selected_pages) < 15:
-                    selected_pages.append(page_num)
+        # Later pages (may contain supplementary data)
+        if total_pages > 15:
+            late_start = max(middle_end, 2 * total_pages // 3)
+            late_end = min(late_start + 4, total_pages + 1)
+            selected_pages.extend(range(late_start, late_end))
         
-        # Priority 4: Structured financial pages
-        if layout_types.get("structured_table", 0) > 0:
-            for page_num in range(1, min(total_pages + 1, 30)):
-                if page_num not in selected_pages and len(selected_pages) < 12:
-                    selected_pages.append(page_num)
+        # Remove duplicates and sort
+        selected_pages = sorted(list(set(selected_pages)))
         
-        # Ensure minimum coverage - add strategic pages if needed
-        if len(selected_pages) < 8:
-            # Add pages from different sections of the document
-            sections = [
-                range(1, min(10, total_pages + 1)),  # Early pages
-                range(max(1, total_pages // 3), min(2 * total_pages // 3, total_pages + 1)),  # Middle
-                range(max(1, 2 * total_pages // 3), total_pages + 1)  # Later pages
-            ]
-            
-            for section in sections:
-                for page_num in section:
-                    if page_num not in selected_pages and len(selected_pages) < 12:
-                        selected_pages.append(page_num)
-                        if len(selected_pages) % 3 == 0:  # Don't add too many at once
-                            break
-        
-        # Final selection and sorting
-        selected_pages = list(set(selected_pages))[:self.MAX_PAGES_TO_PROCESS]
-        selected_pages.sort()
-        
-        print(f"  📄 Selected {len(selected_pages)} industry-relevant pages: {selected_pages[:10]}{'...' if len(selected_pages) > 10 else ''}")
-        return selected_pages
-
-    def _process_pages_with_industry_intelligence(self, pdf_path: str, processing_plan: Dict, 
-                                                max_time_seconds: int, start_time: float) -> Dict:
-        """
-        Process pages with comprehensive industry-specific intelligence
-        """
-        pages_to_process = processing_plan["pages_to_process"]
-        detected_industry = processing_plan["detected_industry"]
-        batch_size = processing_plan["batch_size"]
-        
-        self.processing_progress = {
-            "current": 0, 
-            "total": len(pages_to_process), 
-            "status": "industry_processing"
-        }
+        # Limit to max pages
+        return selected_pages[:self.MAX_PAGES_TO_PROCESS]
+    
+    def _extract_metrics(self, pdf_path: str, document_id: int, processing_plan: Dict) -> Dict:
+        """Extract metrics using unified approach"""
+        pages_to_process = processing_plan['pages_to_process']
+        batch_size = processing_plan['batch_size']
+        detected_industry = processing_plan['detected_industry']
         
         results = {
-            "metrics": [],
-            "processed_pages": [],
-            "skipped_pages": [],
-            "completed": False,
-            "extraction_success_rate": 0.0,
-            "method_performance": {
-                "industry_intelligence": {"attempts": 0, "successes": 0},
-                "focused_extraction": {"attempts": 0, "successes": 0},
-                "fallback_extraction": {"attempts": 0, "successes": 0}
-            }
+            'metrics': [],
+            'processed_pages': [],
+            'skipped_pages': [],
+            'success_rate': 0.0
         }
-        
-        print(f"🔍 Processing {len(pages_to_process)} pages with {detected_industry} intelligence...")
         
         try:
             with pdfplumber.open(pdf_path) as pdf:
                 for i in range(0, len(pages_to_process), batch_size):
-                    # Check time limit
-                    if time.time() - start_time > max_time_seconds:
-                        results["early_termination_reason"] = "Time limit reached"
-                        print(f"  ⏰ Time limit reached, stopping processing")
-                        break
-                    
                     batch_pages = pages_to_process[i:i + batch_size]
-                    batch_results = self._process_industry_batch(
-                        pdf, batch_pages, detected_industry, processing_plan, results
-                    )
                     
-                    # Aggregate results
-                    results["metrics"].extend(batch_results.get("metrics", []))
-                    results["processed_pages"].extend(batch_results.get("processed_pages", []))
-                    results["skipped_pages"].extend(batch_results.get("skipped_pages", []))
+                    for page_num in batch_pages:
+                        try:
+                            if page_num > len(pdf.pages):
+                                results['skipped_pages'].append(page_num)
+                                continue
+                            
+                            page = pdf.pages[page_num - 1]
+                            text = page.extract_text(x_tolerance=1, y_tolerance=3) or ""
+                            
+                            if len(text.strip()) < 100:
+                                results['skipped_pages'].append(page_num)
+                                continue
+                            
+                            # Extract metrics using LLM client
+                            page_metrics = self._extract_page_metrics(
+                                text, page_num, detected_industry, document_id
+                            )
+                            
+                            if page_metrics:
+                                results['metrics'].extend(page_metrics)
+                                results['processed_pages'].append(page_num)
+                                
+                                # Store metrics in database
+                                self._store_page_metrics(document_id, page_metrics)
+                                
+                                print(f"    ✅ Page {page_num}: {len(page_metrics)} metrics")
+                            else:
+                                results['skipped_pages'].append(page_num)
+                                print(f"    ❌ Page {page_num}: No metrics extracted")
+                        
+                        except Exception as e:
+                            print(f"    ❌ Error processing page {page_num}: {e}")
+                            results['skipped_pages'].append(page_num)
+                            continue
                     
                     # Update progress
-                    self.processing_progress["current"] = i + len(batch_pages)
-                    progress_pct = (self.processing_progress["current"] / self.processing_progress["total"]) * 100
-                    print(f"  📊 Progress: {progress_pct:.1f}% ({self.processing_progress['current']}/{self.processing_progress['total']} pages)")
-                    
-                    # Check for comprehensive industry coverage
-                    if len(results["metrics"]) >= 50 and self._has_industry_coverage(results["metrics"], detected_industry):
-                        results["early_termination_reason"] = "Comprehensive industry coverage achieved"
-                        print(f"  ✅ Early termination: Comprehensive {detected_industry} coverage")
-                        break
-                
-                # Mark as completed if no early termination
-                if not results.get("early_termination_reason"):
-                    results["completed"] = True
-                    
-            # Calculate final success rate
-            total_attempts = sum(method_data["attempts"] for method_data in results["method_performance"].values())
-            total_successes = sum(method_data["successes"] for method_data in results["method_performance"].values())
+                    progress = 55 + (i / len(pages_to_process)) * 25  # 55-80% range
+                    self._update_progress(pdf_path, progress, "extracting", 
+                                        f"Processed {i + len(batch_pages)}/{len(pages_to_process)} pages")
             
-            if total_attempts > 0:
-                results["extraction_success_rate"] = total_successes / total_attempts
-                
-        except Exception as e:
-            print(f"❌ Error during industry processing: {e}")
-            results["early_termination_reason"] = f"Processing error: {str(e)}"
-        finally:
-            self.processing_progress["status"] = "completed"
-        
-        return results
-
-    def _process_industry_batch(self, pdf, page_numbers: List[int], detected_industry: str, 
-                              processing_plan: Dict, results: Dict) -> Dict:
-        """
-        Process batch of pages with industry-specific methods
-        """
-        batch_results = {"metrics": [], "processed_pages": [], "skipped_pages": []}
-        
-        # Create industry-specific prompts
-        industry_prompts = self.industry_analyzer.create_industry_prompts(
-            detected_industry, processing_plan.get("layout_analysis")
-        )
-        
-        for page_num in page_numbers:
-            try:
-                if page_num > len(pdf.pages):
-                    batch_results["skipped_pages"].append(page_num)
-                    continue
-                    
-                page = pdf.pages[page_num - 1]
-                text = page.extract_text(x_tolerance=1, y_tolerance=3) or ""
-                
-                if len(text) < 100:
-                    batch_results["skipped_pages"].append(page_num)
-                    continue
-                
-                print(f"    🎯 Processing page {page_num} with {detected_industry} intelligence...")
-                
-                page_metrics = []
-                
-                # Method 1: Industry-specific extraction
-                results["method_performance"]["industry_intelligence"]["attempts"] += 1
-                page_metrics = self._extract_with_industry_intelligence(
-                    text, page_num, detected_industry, industry_prompts.get("primary", "")
-                )
-                
-                if page_metrics:
-                    results["method_performance"]["industry_intelligence"]["successes"] += 1
-                    print(f"    ✅ Industry intelligence: {len(page_metrics)} metrics")
-                else:
-                    # Method 2: Focused metric extraction
-                    if "focused" in industry_prompts:
-                        results["method_performance"]["focused_extraction"]["attempts"] += 1
-                        for metric_name, focused_prompt in list(industry_prompts["focused"].items())[:2]:
-                            focused_metrics = self._extract_with_industry_intelligence(
-                                text, page_num, detected_industry, focused_prompt
-                            )
-                            if focused_metrics:
-                                page_metrics.extend(focused_metrics)
-                                results["method_performance"]["focused_extraction"]["successes"] += 1
-                                print(f"    ✅ Focused extraction ({metric_name}): {len(focused_metrics)} metrics")
-                                break
-                
-                # Method 3: Fallback extraction
-                if not page_metrics:
-                    results["method_performance"]["fallback_extraction"]["attempts"] += 1
-                    page_metrics = self._extract_with_fallback_method(text, page_num)
-                    if page_metrics:
-                        results["method_performance"]["fallback_extraction"]["successes"] += 1
-                        print(f"    ✅ Fallback extraction: {len(page_metrics)} metrics")
-                
-                # Process and classify metrics
-                if page_metrics:
-                    for metric in page_metrics:
-                        metric["metric_type"] = self._classify_metric_type(
-                            metric["metric"], detected_industry
-                        )
-                    
-                    batch_results["metrics"].extend(page_metrics)
-                    batch_results["processed_pages"].append(page_num)
-                    print(f"    📊 Total extracted: {len(page_metrics)} metrics from page {page_num}")
-                else:
-                    print(f"    ❌ No metrics extracted from page {page_num}")
-                    batch_results["skipped_pages"].append(page_num)
-                    
-            except Exception as e:
-                print(f"    ❌ Error processing page {page_num}: {e}")
-                batch_results["skipped_pages"].append(page_num)
-                continue
-        
-        return batch_results
-
-    def _extract_with_industry_intelligence(self, text: str, page_num: int, 
-                                          industry: str, prompt: str) -> List[Dict]:
-        """
-        Extract metrics using industry-specific intelligence
-        """
-        if not prompt.strip():
-            return []
+            # Calculate success rate
+            total_attempted = len(results['processed_pages']) + len(results['skipped_pages'])
+            if total_attempted > 0:
+                results['success_rate'] = len(results['processed_pages']) / total_attempted
             
-        try:
-            # Industry-specific timeout configuration
-            industry_timeouts = {
-                "airlines": 120,  # Complex operational data
-                "banking": 90,   # Dense financial data
-                "technology": 60, # Usually well-structured
-                "retail": 75,    # Mixed data types
-                "energy": 105    # Technical data
-            }
-            
-            timeout = industry_timeouts.get(industry, 90)
-            
-            # Use LLM client for extraction
-            extracted_metrics = self.llm_client.extract_metrics(
-                text, page_num, prompt, timeout, industry
-            )
-            
-            return extracted_metrics
+            return results
             
         except Exception as e:
-            print(f"    ❌ Industry extraction failed for page {page_num}: {e}")
-            return []
-
-    def _extract_with_fallback_method(self, text: str, page_num: int) -> List[Dict]:
-        """
-        Fallback extraction method for when industry-specific methods fail
-        """
-        try:
-            fallback_prompt = """
+            raise Exception(f"Metric extraction failed: {str(e)}")
+    
+    def _extract_page_metrics(self, text: str, page_num: int, industry: str, document_id: int) -> List[Dict]:
+        """Extract metrics from a single page"""
+        # Create industry-specific prompt
+        prompt = self._create_extraction_prompt(industry)
+        
+        # Extract using LLM client
+        metrics = self.llm_client.extract_metrics(text, page_num, prompt, 90, industry)
+        
+        # Classify metrics
+        for metric in metrics:
+            metric['metric_type'] = self._classify_metric_type(metric['metric'], industry)
+            metric['document_id'] = document_id
+        
+        return metrics
+    
+    def _create_extraction_prompt(self, industry: str) -> str:
+        """Create extraction prompt based on industry"""
+        industry_info = self.knowledge_base.get_industry_info(industry)
+        
+        if not industry_info.get('key_metrics'):
+            return """
 Extract all financial and operational metrics from this text.
-
-FOCUS ON:
-- Revenue, income, costs, profits
-- Employee data, customer data, operational statistics
-- Growth rates, ratios, and performance metrics
-
-REQUIRED JSON FORMAT:
-{"metric_name": "descriptive_name", "period": "time_period", "value": number, "unit": "unit_type"}
-
-Return ONLY a valid JSON array.
+Focus on: revenue, costs, profits, employee data, operational statistics.
+Return JSON array: [{"metric_name": "name", "value": number, "unit": "unit", "period": "period"}]
 """
-            
-            return self.llm_client.extract_metrics(text, page_num, fallback_prompt, 60, "general")
-            
-        except Exception as e:
-            print(f"    ❌ Fallback extraction failed for page {page_num}: {e}")
-            return []
+        
+        key_metrics = industry_info['key_metrics']
+        metrics_desc = []
+        
+        for metric, info in key_metrics.items():
+            synonyms = ", ".join(info['synonyms'][:3])
+            metrics_desc.append(f"- {metric}: {info['description']} (terms: {synonyms})")
+        
+        return f"""
+INDUSTRY-SPECIFIC EXTRACTION FOR {industry.upper()}
 
+Extract financial and operational metrics, prioritizing {industry}-specific metrics:
+
+{industry.upper()} METRICS:
+{chr(10).join(metrics_desc)}
+
+UNIVERSAL METRICS:
+- Total revenue, net income, operating costs, employee count, total assets
+
+Return JSON array: [{"metric_name": "name", "value": number, "unit": "unit", "period": "period"}]
+Return ONLY valid JSON array, no other text.
+"""
+    
     def _classify_metric_type(self, metric_name: str, industry: str) -> str:
-        """
-        Classify if metric is universal, industry-specific, or other
-        """
-        # Check universal metrics
-        universal_metrics = list(self.knowledge_base.universal_metrics.keys())
+        """Classify metric as universal, industry-specific, or other"""
         metric_lower = metric_name.lower()
         
-        for universal in universal_metrics:
-            if universal.replace('_', ' ') in metric_lower or universal in metric_lower:
-                return "universal"
+        # Check universal metrics
+        for universal_metric in self.knowledge_base.universal_metrics:
+            if universal_metric.replace('_', ' ') in metric_lower:
+                return 'universal'
         
         # Check industry-specific metrics
         industry_info = self.knowledge_base.get_industry_info(industry)
-        if industry_info and "key_metrics" in industry_info:
-            industry_metrics = list(industry_info["key_metrics"].keys())
-            for industry_metric in industry_metrics:
-                if industry_metric.replace('_', ' ') in metric_lower or industry_metric in metric_lower:
-                    return "industry_specific"
+        if industry_info.get('key_metrics'):
+            for industry_metric in industry_info['key_metrics']:
+                if industry_metric.replace('_', ' ') in metric_lower:
+                    return 'industry_specific'
         
-        return "other"
-
-    def _has_industry_coverage(self, metrics: List[Dict], industry: str) -> bool:
-        """
-        Check if we have good coverage of industry-specific metrics
-        """
-        if industry == "other" or not metrics:
-            return len(metrics) > 40
-        
-        # Get industry schema
-        industry_info = self.knowledge_base.get_industry_info(industry)
-        if not industry_info or not industry_info.get("key_metrics"):
-            return len(metrics) > 30
-        
-        # Check coverage
-        universal_metrics = list(self.knowledge_base.universal_metrics.keys())
-        industry_metrics = list(industry_info["key_metrics"].keys())
-        
-        found_universal = {m.get("metric", "").lower() for m in metrics if m.get("metric_type") == "universal"}
-        found_industry = {m.get("metric", "").lower() for m in metrics if m.get("metric_type") == "industry_specific"}
-        
-        universal_coverage = len([u for u in universal_metrics if u in ' '.join(found_universal)]) / len(universal_metrics)
-        industry_coverage = len([i for i in industry_metrics if i in ' '.join(found_industry)]) / len(industry_metrics)
-        
-        # Good coverage if we have 40%+ universal and 30%+ industry-specific metrics
-        return universal_coverage >= 0.4 and industry_coverage >= 0.3 and len(metrics) > 30
-
-    def _generate_business_insights(self, results: Dict, industry: str) -> List[Dict]:
-        """
-        Generate comprehensive business intelligence insights
-        """
-        metrics = results.get("metrics", [])
-        
+        return 'other'
+    
+    def _store_page_metrics(self, document_id: int, metrics: List[Dict]):
+        """Store extracted metrics in database"""
         if not metrics:
-            return []
+            return
+        
+        cursor = self.db_manager.connection.cursor()
+        
+        metrics_data = []
+        for metric in metrics:
+            metrics_data.append((
+                document_id,
+                metric['page_number'],
+                metric['metric'],
+                metric['metric_type'],
+                metric['value'],
+                metric['unit'],
+                metric['period'],
+                metric['confidence'],
+                metric['extraction_method'],
+                metric.get('source_text', '')
+            ))
+        
+        cursor.executemany("""
+            INSERT INTO financial_metrics 
+            (document_id, page_number, metric_name, metric_type, value, unit, 
+             period, confidence, extraction_method, source_text)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, metrics_data)
+        
+        self.db_manager.connection.commit()
+    
+    def _generate_insights(self, document_id: int, extraction_results: Dict, industry_analysis: Dict) -> List[Dict]:
+        """Generate business insights from extracted metrics"""
+        metrics = extraction_results['metrics']
+        industry = industry_analysis['detected_industry']
         
         insights = []
         
-        # Universal business concepts analysis
-        universal_concepts = {
-            "Financial Health": ["total_revenue", "net_income", "cash_flow", "operating_income"],
-            "Operational Efficiency": ["operating_costs", "efficiency_ratio", "cost_per_ask", "margin"],
-            "Market Position": ["market_share", "customer_base", "growth_rate", "passengers_carried"],
-            "Asset Management": ["total_assets", "fleet_size", "capacity_utilization", "inventory"],
-            "Innovation & Growth": ["r_and_d_spending", "new_products", "technology_investment"]
-        }
-        
-        # Analyze each concept
-        for concept, related_metrics in universal_concepts.items():
-            concept_metrics = []
-            for metric in metrics:
-                metric_name = metric.get("metric", "").lower()
-                if any(rm in metric_name for rm in related_metrics):
-                    concept_metrics.append(metric)
+        # Generate insights based on metrics
+        if metrics:
+            # Financial health insight
+            revenue_metrics = [m for m in metrics if 'revenue' in m['metric'].lower()]
+            if revenue_metrics:
+                revenue = revenue_metrics[0]['value']
+                insights.append({
+                    'concept': 'Financial Performance',
+                    'insight': f"Revenue of {revenue:,.0f} {revenue_metrics[0]['unit']} indicates {'strong' if revenue > 1000 else 'moderate'} financial performance",
+                    'supporting_metrics': [revenue_metrics[0]['metric']],
+                    'confidence': 0.85
+                })
             
-            if concept_metrics:
-                insight_text = self._generate_concept_insight(concept, concept_metrics, industry)
-                if insight_text:
+            # Industry-specific insights
+            if industry == 'airlines':
+                load_factors = [m for m in metrics if 'load_factor' in m['metric'].lower()]
+                if load_factors:
+                    lf = load_factors[0]['value']
+                    performance = 'excellent' if lf > 85 else 'good' if lf > 80 else 'needs improvement'
                     insights.append({
-                        "concept": concept,
-                        "insight": insight_text,
-                        "supporting_metrics": [m["metric"] for m in concept_metrics[:3]],
-                        "confidence": 0.85
+                        'concept': 'Operational Efficiency',
+                        'insight': f"Load factor of {lf:.1f}% indicates {performance} operational efficiency",
+                        'supporting_metrics': [load_factors[0]['metric']],
+                        'confidence': 0.90
                     })
         
-        # Industry-specific insights
-        industry_insights = self._generate_industry_specific_insights(metrics, industry)
-        insights.extend(industry_insights)
+        # Store insights in database
+        if insights:
+            self._store_insights(document_id, insights)
         
         return insights
-
-        def _generate_concept_insight(self, concept: str, metrics: List[Dict], industry: str) -> str:
-            """
-            Generate insight for a business concept
-            """
-            if not metrics:
-                return ""
-            
-            # Find the most recent metrics
-            recent_metrics = {}
-            for metric in metrics:
-                period = metric.get("period", "unknown")
-                if period not in ["unknown", "unspecified"]:
-                    key = metric.get("metric", "")
-                    if key not in recent_metrics or period > recent_metrics[key].get("period", ""):
-                        recent_metrics[key] = metric
-            
-            if not recent_metrics:
-                return ""
-            
-            # Generate concept-specific insights
-            if concept == "Financial Health":
-                revenue_metrics = [m for m in recent_metrics.values() if "revenue" in m.get("metric", "").lower()]
-                if revenue_metrics:
-                    revenue = revenue_metrics[0]
-                    return f"Revenue of {revenue['value']:,.0f} {revenue['unit']} indicates {'strong' if revenue['value'] > 1000 else 'moderate'} financial performance"
-            
-            elif concept == "Operational Efficiency":
-                if industry == "airlines":
-                    load_factor = next((m for m in recent_metrics.values() if "load_factor" in m.get("metric", "").lower()), None)
-                    if load_factor:
-                        efficiency = "excellent" if load_factor["value"] > 85 else "good" if load_factor["value"] > 80 else "needs improvement"
-                        return f"Load factor of {load_factor['value']:.1f}% indicates {efficiency} operational efficiency"
-            
-            return f"{concept} metrics available for analysis"
-
-    def _generate_industry_insights(self, metrics: List[Dict], industry: str) -> List[Dict]:
-        """
-        Generate industry-specific insights
-        """
-        insights = []
+    
+    def _store_insights(self, document_id: int, insights: List[Dict]):
+        """Store business insights in database"""
+        cursor = self.db_manager.connection.cursor()
         
-        if industry == "airlines":
-            # Fleet analysis
-            fleet_metrics = [m for m in metrics if "fleet" in m.get("metric", "").lower()]
-            if fleet_metrics:
-                fleet_size = fleet_metrics[0]["value"]
-                insights.append({
-                    "concept": "Fleet Management",
-                    "insight": f"Operating fleet of {fleet_size:.0f} aircraft indicates {'large-scale' if fleet_size > 400 else 'mid-size'} airline operations",
-                    "supporting_metrics": ["fleet_size"],
-                    "confidence": 0.90
-                })
-        
-        elif industry == "banking":
-            # Branch network analysis
-            branch_metrics = [m for m in metrics if "branch" in m.get("metric", "").lower()]
-            if branch_metrics:
-                branches = branch_metrics[0]["value"]
-                insights.append({
-                    "concept": "Physical Presence",
-                    "insight": f"Network of {branches:.0f} branches indicates {'extensive' if branches > 500 else 'moderate'} physical presence",
-                    "supporting_metrics": ["number_of_branches"],
-                    "confidence": 0.85
-                })
-        
-        return insights
-
-    def _store_comprehensive_results(self, pdf_path: str, industry_analysis: Dict, processing_plan: Dict, 
-                                   results: Dict, business_insights: List[Dict], processing_time: float) -> int:
-        """
-        Store comprehensive results with industry intelligence
-        """
-        print("💾 Storing comprehensive results...")
-        
-        # Store company
-        company_info = {
-            "company_name": industry_analysis["company_name"],
-            "sector": industry_analysis["detected_industry"]
-        }
-        company_id = self._store_company(company_info)
-        
-        # Store document
-        cursor = self.db.cursor()
-        cursor.execute("""
-            INSERT INTO documents 
-            (company_id, filename, total_pages, pages_analyzed, pages_processed, processing_time, toc_pages, financial_sections, processing_strategy) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            company_id,
-            Path(pdf_path).name,
-            industry_analysis["total_pages"],
-            len(processing_plan["pages_to_process"]),
-            len(results.get("processed_pages", [])),
-            processing_time,
-            json.dumps([]),
-            json.dumps(processing_plan["target_metrics"]),
-            f"industry_intelligent_{processing_plan['strategy']}"
-        ))
-        
-        document_id = cursor.lastrowid
-        
-        # Store industry analysis
-        cursor.execute("""
-            INSERT INTO industry_analysis 
-            (document_id, detected_industry, industry_confidence, target_metrics, extraction_strategy)
-            VALUES (?, ?, ?, ?, ?)
-        """, (
-            document_id,
-            industry_analysis["detected_industry"],
-            0.85,
-            json.dumps(processing_plan["target_metrics"]),
-            processing_plan["strategy"]
-        ))
-        
-        # Store metrics
-        if results.get("metrics"):
-            metrics_data = []
-            for m in results["metrics"]:
-                metrics_data.append((
-                    document_id, m["page_number"], m["metric"], m["value"],
-                    m.get("unit", "unknown"), m.get("period", "unknown"),
-                    m["confidence"], m["extraction_method"], m.get("source_text", "")
-                ))
-            
-            cursor.executemany("""
-                INSERT INTO financial_metrics 
-                (document_id, page_number, metric_name, value, unit, period, confidence, extraction_method, source_text) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, metrics_data)
-        
-        # Store business insights
-        for insight in business_insights:
+        for insight in insights:
             cursor.execute("""
                 INSERT INTO business_intelligence 
-                (document_id, universal_concept, insight_text, supporting_metrics, confidence)
+                (document_id, concept, insight_text, supporting_metrics, confidence)
                 VALUES (?, ?, ?, ?, ?)
             """, (
                 document_id,
-                insight["concept"],
-                insight["insight"],
-                json.dumps(insight["supporting_metrics"]),
-                insight["confidence"]
+                insight['concept'],
+                insight['insight'],
+                json.dumps(insight['supporting_metrics']),
+                insight['confidence']
             ))
         
-        self.db.commit()
-        print(f"  ✅ Comprehensive results stored for document ID {document_id}")
-        return document_id
-
-    def _store_company(self, company_info: Dict) -> int:
-        """Store company information"""
-        cursor = self.db.cursor()
-        name = company_info.get("company_name", "Unknown")
-        sector = company_info.get("sector", "other")
+        self.db_manager.connection.commit()
+    
+    def _finalize_processing(self, document_id: int, extraction_results: Dict, 
+                           insights: List[Dict], start_time: float) -> Dict:
+        """Finalize processing and update database"""
+        processing_time = time.time() - start_time
         
-        cursor.execute("SELECT id FROM companies WHERE name = ?", (name,))
-        result = cursor.fetchone()
+        # Update document status
+        cursor = self.db_manager.connection.cursor()
+        cursor.execute("""
+            UPDATE documents 
+            SET status = ?, pages_processed = ?, processing_time = ?, completed_at = ?
+            WHERE id = ?
+        """, (
+            'completed',
+            len(extraction_results['processed_pages']),
+            processing_time,
+            datetime.now(),
+            document_id
+        ))
         
-        if result:
-            return result[0]
-        
-        cursor.execute("INSERT INTO companies (name, sector, sector_confidence) VALUES (?, ?, ?)", (name, sector, 0.85))
-        self.db.commit()
-        return cursor.lastrowid
-
-    def query_company_intelligence(self, document_id: int) -> Dict:
-        """
-        Query comprehensive company intelligence
-        """
-        # Get company and industry info
-        company_info = self.db.execute("""
-            SELECT c.name, c.sector, ia.detected_industry, ia.target_metrics
-            FROM companies c
-            JOIN documents d ON c.id = d.company_id
-            JOIN industry_analysis ia ON d.id = ia.document_id
-            WHERE d.id = ?
-        """, (document_id,)).fetchone()
-        
-        if not company_info:
-            return {"error": "Document not found"}
-        
-        company_name, sector, detected_industry, target_metrics = company_info
-        target_metrics = json.loads(target_metrics) if target_metrics else []
-        
-        # Get all metrics
-        metrics = self.db.execute("""
-            SELECT metric_name, value, unit, period, confidence, extraction_method
-            FROM financial_metrics
-            WHERE document_id = ?
-            ORDER BY confidence DESC
-        """, (document_id,)).fetchall()
-        
-        # Get business insights
-        insights = self.db.execute("""
-            SELECT universal_concept, insight_text, supporting_metrics, confidence
-            FROM business_intelligence
-            WHERE document_id = ?
-            ORDER BY confidence DESC
-        """, (document_id,)).fetchall()
-        
-        # Organize metrics by type
-        universal_metrics = {}
-        industry_metrics = {}
-        
-        for metric, value, unit, period, confidence, method in metrics:
-            metric_data = {
-                "value": value,
-                "unit": unit,
-                "period": period,
-                "confidence": confidence,
-                "method": method
-            }
-            
-            if any(universal in metric.lower() for universal in self.knowledge_base.universal_metrics.keys()):
-                universal_metrics[metric] = metric_data
-            else:
-                industry_metrics[metric] = metric_data
-        
-        # Format insights
-        formatted_insights = []
-        for concept, insight_text, supporting_metrics, confidence in insights:
-            formatted_insights.append({
-                "concept": concept,
-                "insight": insight_text,
-                "supporting_metrics": json.loads(supporting_metrics) if supporting_metrics else [],
-                "confidence": confidence
-            })
+        self.db_manager.connection.commit()
         
         return {
-            "company_profile": {
-                "name": company_name,
-                "detected_industry": detected_industry,
-                "sector": sector,
-                "target_metrics_found": len(metrics),
-                "total_target_metrics": len(target_metrics)
-            },
-            "universal_metrics": universal_metrics,
-            "industry_specific_metrics": industry_metrics,
-            "business_intelligence": formatted_insights,
-            "coverage_analysis": {
-                "universal_coverage": len(universal_metrics),
-                "industry_coverage": len(industry_metrics),
-                "total_metrics": len(metrics)
-            }
+            'success': True,
+            'document_id': document_id,
+            'metrics_extracted': len(extraction_results['metrics']),
+            'pages_processed': len(extraction_results['processed_pages']),
+            'insights_generated': len(insights),
+            'processing_time': processing_time,
+            'success_rate': extraction_results['success_rate']
         }
+    
+    def _update_document_status(self, document_id: int, status: str, error_message: str = None):
+        """Update document processing status"""
+        cursor = self.db_manager.connection.cursor()
+        cursor.execute("""
+            UPDATE documents 
+            SET status = ?, completed_at = ?
+            WHERE id = ?
+        """, (status, datetime.now(), document_id))
+        
+        if error_message:
+            cursor.execute("""
+                INSERT INTO processing_logs (document_id, stage, message, level)
+                VALUES (?, ?, ?, ?)
+            """, (document_id, 'error', error_message, 'ERROR'))
+        
+        self.db_manager.connection.commit()
+    
+    def _update_progress(self, pdf_path: str, progress: int, status: str, message: str):
+        """Update processing progress"""
+        self.processing_progress[pdf_path] = {
+            'current': progress,
+            'total': 100,
+            'status': status,
+            'message': message
+        }
+    
+    def _extract_company_name(self, text: str) -> str:
+        """Extract company name from text"""
+        import re
+        
+        patterns = [
+            r'([A-Z][A-Za-z\s&\.]+(?:GROUP|PLC|INC|CORP|LIMITED|LTD|HOLDINGS|SA|AG|NV|LLC))',
+            r'ANNUAL\s*REPORT\s*(?:2024|2025|2023|2022)\s*(?:FOR|OF)\s*([A-Z][A-Za-z\s,&\.]+)',
+            r'([A-Z][A-Za-z\s&\.]+)\s*(?:ANNUAL|FINANCIAL)\s*REPORT'
+        ]
+        
+        for pattern in patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for match in matches:
+                name = match.strip()
+                name = re.sub(r'\s+', ' ', name)
+                if 3 <= len(name) <= 100 and not any(fp in name.upper() for fp in ['ANNUAL REPORT', 'FINANCIAL STATEMENTS']):
+                    return name
+        
+        return "Unknown Company"
+    
+    def get_company_intelligence(self, document_id: int) -> Dict:
+        """Get comprehensive company intelligence"""
+        cursor = self.db_manager.connection.cursor()
+        
+        try:
+            # Get basic document info
+            cursor.execute("""
+                SELECT c.name, c.detected_industry, c.industry_confidence,
+                       d.filename, d.total_pages, d.pages_processed, d.processing_time, d.status
+                FROM companies c
+                JOIN documents d ON c.id = d.company_id
+                WHERE d.id = ?
+            """, (document_id,))
+            
+            doc_info = cursor.fetchone()
+            if not doc_info:
+                return {'error': 'Document not found'}
+            
+            # Get metrics
+            cursor.execute("""
+                SELECT metric_name, metric_type, value, unit, period, confidence
+                FROM financial_metrics
+                WHERE document_id = ?
+                ORDER BY confidence DESC, metric_type
+            """, (document_id,))
+            
+            metrics_data = cursor.fetchall()
+            
+            # Get insights
+            cursor.execute("""
+                SELECT concept, insight_text, supporting_metrics, confidence
+                FROM business_intelligence
+                WHERE document_id = ?
+                ORDER BY confidence DESC
+            """, (document_id,))
+            
+            insights_data = cursor.fetchall()
+            
+            # Organize data
+            universal_metrics = {}
+            industry_metrics = {}
+            other_metrics = {}
+            
+            for row in metrics_data:
+                metric_info = {
+                    'value': row[2],
+                    'unit': row[3],
+                    'period': row[4],
+                    'confidence': row[5]
+                }
+                
+                if row[1] == 'universal':
+                    universal_metrics[row[0]] = metric_info
+                elif row[1] == 'industry_specific':
+                    industry_metrics[row[0]] = metric_info
+                else:
+                    other_metrics[row[0]] = metric_info
+            
+            # Format insights
+            insights = []
+            for row in insights_data:
+                insights.append({
+                    'concept': row[0],
+                    'insight': row[1],
+                    'supporting_metrics': json.loads(row[2]) if row[2] else [],
+                    'confidence': row[3]
+                })
+            
+            return {
+                'company_profile': {
+                    'name': doc_info[0],
+                    'detected_industry': doc_info[1],
+                    'industry_confidence': doc_info[2],
+                    'filename': doc_info[3],
+                    'total_pages': doc_info[4],
+                    'pages_processed': doc_info[5],
+                    'processing_time': doc_info[6],
+                    'status': doc_info[7]
+                },
+                'universal_metrics': universal_metrics,
+                'industry_specific_metrics': industry_metrics,
+                'other_metrics': other_metrics,
+                'business_intelligence': insights,
+                'coverage_analysis': {
+                    'total_metrics': len(metrics_data),
+                    'universal_coverage': len(universal_metrics),
+                    'industry_coverage': len(industry_metrics),
+                    'other_coverage': len(other_metrics)
+                }
+            }
+            
+        except Exception as e:
+            return {'error': f'Failed to get intelligence: {str(e)}'}
+    
+    def get_processing_progress(self, document_id: int) -> Dict:
+        """Get processing progress for a document"""
+        cursor = self.db_manager.connection.cursor()
+        
+        try:
+            # Get document status
+            cursor.execute("""
+                SELECT status, pages_processed, total_pages, processing_time
+                FROM documents
+                WHERE id = ?
+            """, (document_id,))
+            
+            result = cursor.fetchone()
+            if not result:
+                return {'error': 'Document not found', 'status': 'not_found'}
+            
+            status, pages_processed, total_pages, processing_time = result
+            
+            # Calculate progress percentage
+            if status == 'completed':
+                progress = 100
+            elif status == 'failed':
+                progress = 0
+            elif pages_processed and total_pages:
+                progress = min(int((pages_processed / total_pages) * 100), 95)
+            else:
+                progress = 10  # Initial progress
+            
+            return {
+                'document_id': document_id,
+                'status': status,
+                'progress': progress,
+                'pages_processed': pages_processed or 0,
+                'total_pages': total_pages or 0,
+                'processing_time': processing_time,
+                'message': self._get_status_message(status, progress)
+            }
+            
+        except Exception as e:
+            return {'error': f'Failed to get progress: {str(e)}', 'status': 'error'}
+    
+    def _get_status_message(self, status: str, progress: int) -> str:
+        """Get human-readable status message"""
+        if status == 'completed':
+            return 'Analysis completed successfully'
+        elif status == 'failed':
+            return 'Analysis failed'
+        elif status == 'processing':
+            if progress < 20:
+                return 'Analyzing document structure...'
+            elif progress < 40:
+                return 'Detecting industry type...'
+            elif progress < 70:
+                return 'Extracting metrics...'
+            elif progress < 90:
+                return 'Generating insights...'
+            else:
+                return 'Finalizing analysis...'
+        else:
+            return 'Processing...'
+    
+    def get_recent_analyses(self, limit: int = 6) -> List[Dict]:
+        """Get recent analyses for dashboard"""
+        cursor = self.db_manager.connection.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT d.id, c.name, c.detected_industry, d.created_at, d.status,
+                       COUNT(fm.id) as metric_count
+                FROM documents d
+                JOIN companies c ON d.company_id = c.id
+                LEFT JOIN financial_metrics fm ON d.id = fm.document_id
+                WHERE d.status = 'completed'
+                GROUP BY d.id
+                ORDER BY d.created_at DESC
+                LIMIT ?
+            """, (limit,))
+            
+            results = cursor.fetchall()
+            
+            recent = []
+            for row in results:
+                recent.append({
+                    'id': row[0],
+                    'company': row[1],
+                    'industry': row[2] or 'Other',
+                    'date': row[3],
+                    'status': row[4],
+                    'metrics': row[5]
+                })
+            
+            return recent
+            
+        except Exception as e:
+            print(f"Error getting recent analyses: {e}")
+            return []
