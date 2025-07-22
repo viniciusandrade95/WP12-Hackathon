@@ -1,5 +1,4 @@
-
-# core/knowledge_base.py (Fixed version)
+# core/knowledge_base.py (Fixed version with missing methods)
 """
 Complete GICS-based industry knowledge base
 """
@@ -200,6 +199,29 @@ class GICSKnowledgeBase:
                     "How efficiently do they manage inventory?",
                     "What's their store productivity?"
                 ]
+            },
+            "energy": {
+                "display_name": "Energy",
+                "sector": "Energy",
+                "key_metrics": {
+                    "production_volume": {
+                        "synonyms": ["production volume", "oil production", "gas production", "output"],
+                        "unit": "barrels",
+                        "importance": "high",
+                        "description": "Total production output"
+                    },
+                    "proved_reserves": {
+                        "synonyms": ["proved reserves", "1p reserves", "oil reserves"],
+                        "unit": "barrels",
+                        "importance": "critical",
+                        "description": "Confirmed oil and gas reserves"
+                    }
+                },
+                "business_questions": [
+                    "What's their production capacity?",
+                    "How much reserves do they have?",
+                    "What's their cost structure?"
+                ]
             }
         }
     
@@ -284,7 +306,7 @@ class GICSKnowledgeBase:
         
         return self.industry_schemas[industry]
     
-    def get_critical_metrics(self, industry: str) -> list[str]:
+    def get_critical_metrics(self, industry: str) -> list:
         """Get the most important metrics for an industry"""
         if industry not in self.industry_schemas:
             return list(self.universal_metrics.keys())
@@ -305,7 +327,7 @@ class GICSKnowledgeBase:
         
         return critical + high + universal
     
-    def get_all_target_metrics(self, industry: str) -> list[str]:
+    def get_all_target_metrics(self, industry: str) -> list:
         """Get all metrics to search for (universal + industry-specific)"""
         universal_metrics = list(self.universal_metrics.keys())
         
@@ -314,4 +336,3 @@ class GICSKnowledgeBase:
             return universal_metrics + industry_metrics
         
         return universal_metrics
-

@@ -31,6 +31,12 @@ class Config:
     # Performance
     REQUEST_TIMEOUT = 30
     LLM_TIMEOUT = 90
+
+    # Verification settings
+    ENABLE_DUAL_AGENT_VERIFICATION = True
+    VERIFICATION_CONFIDENCE_THRESHOLD = 0.7  # Only store metrics above this
+    DISPUTE_REVIEW_REQUIRED = True  # Flag disputed metrics for review
+    MAX_VERIFICATION_TIME = 180  # 3 minutes per page
     
     @classmethod
     def validate(cls):

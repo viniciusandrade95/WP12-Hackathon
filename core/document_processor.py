@@ -1,29 +1,29 @@
-# core/unified_document_processor.py
+# core/document_processor.py (Simplified version that actually works)
 """
-Unified document processor that resolves all architectural inconsistencies
+Simplified document processor that mirrors the working single-file version
 """
 
 import json
 import time
 import pdfplumber
+import re
 from pathlib import Path
 from typing import Dict, List, Optional
 from datetime import datetime
 
-from .industry_analyzer import IndustryIntelligentAnalyzer
 from .knowledge_base import GICSKnowledgeBase
 from .database import DatabaseManager
 from utils.api_client import LLMClient
+from .dual_agent_verification import DualAgentVerificationSystem, VerificationStatus
 
 class DocumentProcessor:
     """
-    Unified document processor with resolved inconsistencies
+    Simplified document processor that matches the original working version
     """
     
     def __init__(self, llm_client: LLMClient, db_manager: DatabaseManager):
         self.llm_client = llm_client
         self.db_manager = db_manager
-        self.industry_analyzer = IndustryIntelligentAnalyzer()
         self.knowledge_base = GICSKnowledgeBase()
         
         # Processing configuration
@@ -33,70 +33,56 @@ class DocumentProcessor:
         
         # Progress tracking
         self.processing_progress = {}
+
+        # Add dual-agent system
+        self.verification_system = DualAgentVerificationSystem(llm_client)
         
     def process_document(self, pdf_path: str) -> Dict:
         """
-        Complete document processing pipeline with unified approach
+        Main document processing pipeline
         """
         document_id = None
         start_time = time.time()
         
         try:
-            print(f"\n🚀 Starting Unified Document Processing...")
-            
-            # Initialize progress tracking
-            self.processing_progress[pdf_path] = {
-                "current": 0, 
-                "total": 100, 
-                "status": "initializing",
-                "message": "Starting analysis..."
-            }
+            print(f"\n🚀 Starting Document Processing...")
             
             # Phase 1: Document structure analysis
             print("📋 Phase 1: Document structure analysis...")
-            self._update_progress(pdf_path, 10, "analyzing", "Analyzing document structure...")
-            
             structure_analysis = self._analyze_document_structure(pdf_path)
             if not structure_analysis.get('success'):
                 return structure_analysis
             
             # Phase 2: Industry detection
             print("🏭 Phase 2: Industry detection...")
-            self._update_progress(pdf_path, 25, "detecting", "Detecting industry type...")
-            
-            industry_analysis = self._detect_industry(structure_analysis)
+            industry_detection = self.knowledge_base.detect_industry(
+                structure_analysis['sample_text'], 
+                structure_analysis['company_name']
+            )
             
             # Phase 3: Create company and document records
             print("💾 Phase 3: Creating database records...")
-            self._update_progress(pdf_path, 35, "storing", "Creating database records...")
+            document_id = self._create_document_record(
+                pdf_path, structure_analysis, industry_detection
+            )
             
-            document_id = self._create_document_record(pdf_path, structure_analysis, industry_analysis)
+            # Phase 4: Extract metrics
+            print("🔍 Phase 4: Extracting metrics...")
+            extraction_results = self._extract_metrics(
+                pdf_path, document_id, industry_detection
+            )
             
-            # Phase 4: Create processing plan
-            print("📋 Phase 4: Creating processing plan...")
-            self._update_progress(pdf_path, 45, "planning", "Creating extraction plan...")
+            # Phase 5: Generate insights
+            print("🧠 Phase 5: Generating business insights...")
+            insights = self._generate_insights(
+                document_id, extraction_results, industry_detection
+            )
             
-            processing_plan = self._create_processing_plan(document_id, structure_analysis, industry_analysis)
-            
-            # Phase 5: Extract metrics
-            print("🔍 Phase 5: Extracting metrics...")
-            self._update_progress(pdf_path, 55, "extracting", "Extracting financial metrics...")
-            
-            extraction_results = self._extract_metrics(pdf_path, document_id, processing_plan)
-            
-            # Phase 6: Generate insights
-            print("🧠 Phase 6: Generating business insights...")
-            self._update_progress(pdf_path, 85, "analyzing", "Generating business insights...")
-            
-            insights = self._generate_insights(document_id, extraction_results, industry_analysis)
-            
-            # Phase 7: Finalize processing
-            print("✅ Phase 7: Finalizing...")
-            self._update_progress(pdf_path, 95, "finalizing", "Finalizing analysis...")
-            
-            final_results = self._finalize_processing(document_id, extraction_results, insights, start_time)
-            
-            self._update_progress(pdf_path, 100, "completed", "Analysis complete!")
+            # Phase 6: Finalize processing
+            print("✅ Phase 6: Finalizing...")
+            final_results = self._finalize_processing(
+                document_id, extraction_results, insights, start_time
+            )
             
             print(f"✅ Processing completed successfully in {time.time() - start_time:.1f}s")
             return final_results
@@ -104,11 +90,8 @@ class DocumentProcessor:
         except Exception as e:
             print(f"❌ Processing failed: {str(e)}")
             
-            # Update document status if we have document_id
             if document_id:
                 self._update_document_status(document_id, "failed", str(e))
-            
-            self._update_progress(pdf_path, 0, "failed", f"Processing failed: {str(e)}")
             
             return {
                 'success': False,
@@ -118,7 +101,7 @@ class DocumentProcessor:
             }
     
     def _analyze_document_structure(self, pdf_path: str) -> Dict:
-        """Analyze document structure with error handling"""
+        """Analyze document structure"""
         try:
             with pdfplumber.open(pdf_path) as pdf:
                 total_pages = len(pdf.pages)
@@ -145,7 +128,7 @@ class DocumentProcessor:
                 return {
                     'success': True,
                     'total_pages': total_pages,
-                    'sample_text': sample_text[:3000],  # Limit sample size
+                    'sample_text': sample_text[:3000],
                     'company_name': company_name,
                     'file_path': pdf_path
                 }
@@ -153,45 +136,16 @@ class DocumentProcessor:
         except Exception as e:
             return {'success': False, 'error': f'Failed to analyze PDF structure: {str(e)}'}
     
-    def _detect_industry(self, structure_analysis: Dict) -> Dict:
-        """Detect industry with improved error handling"""
-        try:
-            sample_text = structure_analysis['sample_text']
-            company_name = structure_analysis['company_name']
-            
-            # Use knowledge base for industry detection
-            industry_result = self.knowledge_base.detect_industry(sample_text, company_name)
-            
-            # Get industry information
-            industry_info = self.knowledge_base.get_industry_info(industry_result['industry'])
-            
-            return {
-                'detected_industry': industry_result['industry'],
-                'confidence': industry_result['confidence'],
-                'scores': industry_result.get('scores', {}),
-                'industry_info': industry_info,
-                'target_metrics': self.knowledge_base.get_all_target_metrics(industry_result['industry'])
-            }
-            
-        except Exception as e:
-            # Fallback to 'other' industry
-            return {
-                'detected_industry': 'other',
-                'confidence': 0.0,
-                'scores': {},
-                'industry_info': {},
-                'target_metrics': list(self.knowledge_base.universal_metrics.keys())
-            }
-    
-    def _create_document_record(self, pdf_path: str, structure_analysis: Dict, industry_analysis: Dict) -> int:
+    def _create_document_record(self, pdf_path: str, structure_analysis: Dict, 
+                               industry_detection: Dict) -> int:
         """Create company and document records in database"""
         cursor = self.db_manager.connection.cursor()
         
         try:
             # Create or get company
             company_name = structure_analysis['company_name']
-            detected_industry = industry_analysis['detected_industry']
-            industry_confidence = industry_analysis['confidence']
+            detected_industry = industry_detection['industry']
+            industry_confidence = industry_detection['confidence']
             
             # Check if company exists
             cursor.execute("SELECT id FROM companies WHERE name = ?", (company_name,))
@@ -225,7 +179,7 @@ class DocumentProcessor:
                 pdf_path, 
                 structure_analysis['total_pages'], 
                 'processing',
-                f"unified_{detected_industry}"
+                f"simplified_{detected_industry}"
             ))
             
             document_id = cursor.lastrowid
@@ -239,8 +193,8 @@ class DocumentProcessor:
                 document_id,
                 detected_industry,
                 industry_confidence,
-                json.dumps(industry_analysis['scores']),
-                json.dumps(industry_analysis['target_metrics'])
+                json.dumps(industry_detection.get('scores', {})),
+                json.dumps(self.knowledge_base.get_all_target_metrics(detected_industry))
             ))
             
             self.db_manager.connection.commit()
@@ -252,31 +206,73 @@ class DocumentProcessor:
             self.db_manager.connection.rollback()
             raise Exception(f"Failed to create document record: {str(e)}")
     
-    def _create_processing_plan(self, document_id: int, structure_analysis: Dict, industry_analysis: Dict) -> Dict:
-        """Create optimized processing plan"""
-        total_pages = structure_analysis['total_pages']
-        detected_industry = industry_analysis['detected_industry']
+    def _extract_metrics(self, pdf_path: str, document_id: int, processing_plan: Dict) -> Dict:
+        """Extract metrics using dual-agent verification system"""
+        pages_to_process = processing_plan['pages_to_process']
+        detected_industry = processing_plan['detected_industry']
         
-        # Smart page selection
-        pages_to_process = self._select_pages_to_process(total_pages, detected_industry)
-        
-        # Determine batch size based on industry complexity
-        if detected_industry in ['airlines', 'banking']:
-            batch_size = 3  # More complex industries need smaller batches
-        else:
-            batch_size = 4
-        
-        return {
-            'document_id': document_id,
-            'pages_to_process': pages_to_process,
-            'batch_size': batch_size,
-            'detected_industry': detected_industry,
-            'target_metrics': industry_analysis['target_metrics'],
-            'estimated_time': len(pages_to_process) * 2.5  # seconds per page
+        results = {
+            'verified_metrics': [],
+            'disputed_metrics': [],
+            'uncertain_metrics': [],
+            'processed_pages': [],
+            'verification_summary': {}
         }
+        
+        try:
+            with pdfplumber.open(pdf_path) as pdf:
+                for page_num in pages_to_process:
+                    page = pdf.pages[page_num - 1]
+                    text = page.extract_text() or ""
+                    
+                    if len(text.strip()) < 100:
+                        continue
+                    
+                    # Use dual-agent verification instead of single extraction
+                    verification_results = self.verification_system.extract_and_verify(
+                        text, page_num, detected_industry
+                    )
+                    
+                    # Categorize results by verification status
+                    for result in verification_results:
+                        metric_data = self._convert_verification_to_metric(result, document_id)
+                        
+                        if result.status == VerificationStatus.VERIFIED:
+                            results['verified_metrics'].append(metric_data)
+                        elif result.status == VerificationStatus.DISPUTED:
+                            results['disputed_metrics'].append(metric_data)
+                        else:
+                            results['uncertain_metrics'].append(metric_data)
+                    
+                    results['processed_pages'].append(page_num)
+                    
+                    # Store all metrics in database with verification status
+                    self._store_verified_metrics(document_id, verification_results)
+                    
+                    print(f"    ✅ Page {page_num}: {len(verification_results)} metrics processed")
+            
+            # Get verification summary
+            results['verification_summary'] = self.verification_system.get_verification_summary()
+            
+            # Combine all metrics for backward compatibility
+            all_metrics = (results['verified_metrics'] + 
+                          results['uncertain_metrics'] + 
+                          results['disputed_metrics'])
+            results['metrics'] = all_metrics
+            
+            return results
+            
+        except Exception as e:
+            raise Exception(f"Dual-agent metric extraction failed: {str(e)}")
     
-    def _select_pages_to_process(self, total_pages: int, industry: str) -> List[int]:
+    def _select_pages_to_process(self, pdf_path: str, industry: str) -> List[int]:
         """Select optimal pages for processing"""
+        try:
+            with pdfplumber.open(pdf_path) as pdf:
+                total_pages = len(pdf.pages)
+        except:
+            return list(range(1, min(self.MAX_PAGES_TO_PROCESS + 1, 21)))
+        
         if total_pages <= self.MAX_PAGES_TO_PROCESS:
             return list(range(1, total_pages + 1))
         
@@ -302,74 +298,6 @@ class DocumentProcessor:
         
         # Limit to max pages
         return selected_pages[:self.MAX_PAGES_TO_PROCESS]
-    
-    def _extract_metrics(self, pdf_path: str, document_id: int, processing_plan: Dict) -> Dict:
-        """Extract metrics using unified approach"""
-        pages_to_process = processing_plan['pages_to_process']
-        batch_size = processing_plan['batch_size']
-        detected_industry = processing_plan['detected_industry']
-        
-        results = {
-            'metrics': [],
-            'processed_pages': [],
-            'skipped_pages': [],
-            'success_rate': 0.0
-        }
-        
-        try:
-            with pdfplumber.open(pdf_path) as pdf:
-                for i in range(0, len(pages_to_process), batch_size):
-                    batch_pages = pages_to_process[i:i + batch_size]
-                    
-                    for page_num in batch_pages:
-                        try:
-                            if page_num > len(pdf.pages):
-                                results['skipped_pages'].append(page_num)
-                                continue
-                            
-                            page = pdf.pages[page_num - 1]
-                            text = page.extract_text(x_tolerance=1, y_tolerance=3) or ""
-                            
-                            if len(text.strip()) < 100:
-                                results['skipped_pages'].append(page_num)
-                                continue
-                            
-                            # Extract metrics using LLM client
-                            page_metrics = self._extract_page_metrics(
-                                text, page_num, detected_industry, document_id
-                            )
-                            
-                            if page_metrics:
-                                results['metrics'].extend(page_metrics)
-                                results['processed_pages'].append(page_num)
-                                
-                                # Store metrics in database
-                                self._store_page_metrics(document_id, page_metrics)
-                                
-                                print(f"    ✅ Page {page_num}: {len(page_metrics)} metrics")
-                            else:
-                                results['skipped_pages'].append(page_num)
-                                print(f"    ❌ Page {page_num}: No metrics extracted")
-                        
-                        except Exception as e:
-                            print(f"    ❌ Error processing page {page_num}: {e}")
-                            results['skipped_pages'].append(page_num)
-                            continue
-                    
-                    # Update progress
-                    progress = 55 + (i / len(pages_to_process)) * 25  # 55-80% range
-                    self._update_progress(pdf_path, progress, "extracting", 
-                                        f"Processed {i + len(batch_pages)}/{len(pages_to_process)} pages")
-            
-            # Calculate success rate
-            total_attempted = len(results['processed_pages']) + len(results['skipped_pages'])
-            if total_attempted > 0:
-                results['success_rate'] = len(results['processed_pages']) / total_attempted
-            
-            return results
-            
-        except Exception as e:
-            raise Exception(f"Metric extraction failed: {str(e)}")
     
     def _extract_page_metrics(self, text: str, page_num: int, industry: str, document_id: int) -> List[Dict]:
         """Extract metrics from a single page"""
@@ -402,22 +330,24 @@ Return JSON array: [{"metric_name": "name", "value": number, "unit": "unit", "pe
         
         for metric, info in key_metrics.items():
             synonyms = ", ".join(info['synonyms'][:3])
-            metrics_desc.append(f"- {metric}: {info['description']} (terms: {synonyms})")
+            metrics_desc.append("- {}: {} (terms: {})".format(metric, info['description'], synonyms))
         
-        return f"""
-INDUSTRY-SPECIFIC EXTRACTION FOR {industry.upper()}
+        metrics_section = "\n".join(metrics_desc)
+        
+        return """
+INDUSTRY-SPECIFIC EXTRACTION FOR {}
 
-Extract financial and operational metrics, prioritizing {industry}-specific metrics:
+Extract financial and operational metrics, prioritizing {}-specific metrics:
 
-{industry.upper()} METRICS:
-{chr(10).join(metrics_desc)}
+{} METRICS:
+{}
 
 UNIVERSAL METRICS:
 - Total revenue, net income, operating costs, employee count, total assets
 
-Return JSON array: [{"metric_name": "name", "value": number, "unit": "unit", "period": "period"}]
+Return JSON array: [{{"metric_name": "name", "value": number, "unit": "unit", "period": "period"}}]
 Return ONLY valid JSON array, no other text.
-"""
+""".format(industry.upper(), industry, industry.upper(), metrics_section)
     
     def _classify_metric_type(self, metric_name: str, industry: str) -> str:
         """Classify metric as universal, industry-specific, or other"""
@@ -468,10 +398,11 @@ Return ONLY valid JSON array, no other text.
         
         self.db_manager.connection.commit()
     
-    def _generate_insights(self, document_id: int, extraction_results: Dict, industry_analysis: Dict) -> List[Dict]:
+    def _generate_insights(self, document_id: int, extraction_results: Dict, 
+                          industry_detection: Dict) -> List[Dict]:
         """Generate business insights from extracted metrics"""
         metrics = extraction_results['metrics']
-        industry = industry_analysis['detected_industry']
+        industry = industry_detection['industry']
         
         insights = []
         
@@ -574,19 +505,8 @@ Return ONLY valid JSON array, no other text.
         
         self.db_manager.connection.commit()
     
-    def _update_progress(self, pdf_path: str, progress: int, status: str, message: str):
-        """Update processing progress"""
-        self.processing_progress[pdf_path] = {
-            'current': progress,
-            'total': 100,
-            'status': status,
-            'message': message
-        }
-    
     def _extract_company_name(self, text: str) -> str:
         """Extract company name from text"""
-        import re
-        
         patterns = [
             r'([A-Z][A-Za-z\s&\.]+(?:GROUP|PLC|INC|CORP|LIMITED|LTD|HOLDINGS|SA|AG|NV|LLC))',
             r'ANNUAL\s*REPORT\s*(?:2024|2025|2023|2022)\s*(?:FOR|OF)\s*([A-Z][A-Za-z\s,&\.]+)',
@@ -603,6 +523,68 @@ Return ONLY valid JSON array, no other text.
         
         return "Unknown Company"
     
+    def _store_verified_metrics(self, document_id: int, verification_results: List[VerificationResult]):
+        """Store metrics with verification information"""
+        cursor = self.db_manager.connection.cursor()
+        
+        for result in verification_results:
+            # Store the main metric
+            cursor.execute("""
+                INSERT INTO financial_metrics 
+                (document_id, page_number, metric_name, metric_type, value, unit, 
+                period, confidence, extraction_method, source_text)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                document_id,
+                result.original_claim.evidence.page_number,
+                result.original_claim.metric_name,
+                self._classify_metric_type(result.original_claim.metric_name, detected_industry),
+                result.consensus_value or result.original_claim.value,
+                result.original_claim.unit,
+                result.original_claim.period,
+                result.confidence_score,
+                "dual_agent_verification",
+                result.original_claim.evidence.source_quote
+            ))
+            
+            metric_id = cursor.lastrowid
+            
+            # Store verification details
+            cursor.execute("""
+                INSERT INTO metric_verification 
+                (metric_id, verification_status, original_confidence, verification_confidence,
+                consensus_confidence, original_source_quote, verification_source_quote,
+                conflict_analysis, resolution_reasoning)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                metric_id,
+                result.status.value,
+                result.original_claim.evidence.confidence,
+                result.verification_claim.evidence.confidence if result.verification_claim else None,
+                result.confidence_score,
+                result.original_claim.evidence.source_quote,
+                result.verification_claim.evidence.source_quote if result.verification_claim else None,
+                result.conflict_analysis,
+                result.resolution_reasoning
+            ))
+        
+        self.db_manager.connection.commit()
+
+    def _convert_verification_to_metric(self, result: VerificationResult, document_id: int) -> Dict:
+        """Convert verification result to metric format for backward compatibility"""
+        return {
+            'metric': result.original_claim.metric_name,
+            'value': result.consensus_value or result.original_claim.value,
+            'unit': result.original_claim.unit,
+            'period': result.original_claim.period,
+            'confidence': result.confidence_score,
+            'page_number': result.original_claim.evidence.page_number,
+            'extraction_method': 'dual_agent_verification',
+            'verification_status': result.status.value,
+            'source_text': result.original_claim.evidence.source_quote,
+            'document_id': document_id
+        }
+
     def get_company_intelligence(self, document_id: int) -> Dict:
         """Get comprehensive company intelligence"""
         cursor = self.db_manager.connection.cursor()
@@ -623,10 +605,12 @@ Return ONLY valid JSON array, no other text.
             
             # Get metrics
             cursor.execute("""
-                SELECT metric_name, metric_type, value, unit, period, confidence
-                FROM financial_metrics
-                WHERE document_id = ?
-                ORDER BY confidence DESC, metric_type
+                SELECT fm.metric_name, fm.metric_type, fm.value, fm.unit, fm.period, 
+                    fm.confidence, mv.verification_status, mv.conflict_analysis
+                FROM financial_metrics fm
+                LEFT JOIN metric_verification mv ON fm.id = mv.metric_id
+                WHERE fm.document_id = ?
+                ORDER BY mv.verification_status, fm.confidence DESC
             """, (document_id,))
             
             metrics_data = cursor.fetchall()
@@ -645,21 +629,31 @@ Return ONLY valid JSON array, no other text.
             universal_metrics = {}
             industry_metrics = {}
             other_metrics = {}
+            verified_metrics = {}
+            disputed_metrics = {}
+            uncertain_metrics = {}
             
             for row in metrics_data:
                 metric_info = {
                     'value': row[2],
                     'unit': row[3],
                     'period': row[4],
-                    'confidence': row[5]
+                    'confidence': row[5],
+                    'verification_status': row[6],
+                    'notes': row[7]  # conflict_analysis
                 }
                 
-                if row[1] == 'universal':
-                    universal_metrics[row[0]] = metric_info
-                elif row[1] == 'industry_specific':
-                    industry_metrics[row[0]] = metric_info
+                if row[6] == 'verified':
+                    if row[1] == 'universal':
+                        universal_metrics[row[0]] = metric_info
+                    elif row[1] == 'industry_specific':
+                        industry_metrics[row[0]] = metric_info
+                    else:
+                        other_metrics[row[0]] = metric_info
+                elif row[6] == 'disputed':
+                    disputed_metrics[row[0]] = metric_info
                 else:
-                    other_metrics[row[0]] = metric_info
+                    uncertain_metrics[row[0]] = metric_info
             
             # Format insights
             insights = []
@@ -686,6 +680,10 @@ Return ONLY valid JSON array, no other text.
                 'industry_specific_metrics': industry_metrics,
                 'other_metrics': other_metrics,
                 'business_intelligence': insights,
+                'verified_metrics': verified_metrics,
+                'disputed_metrics': disputed_metrics,
+                'uncertain_metrics': uncertain_metrics,
+                'verification_summary': self._get_verification_summary(document_id),
                 'coverage_analysis': {
                     'total_metrics': len(metrics_data),
                     'universal_coverage': len(universal_metrics),

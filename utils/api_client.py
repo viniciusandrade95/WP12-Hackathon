@@ -28,7 +28,7 @@ class LLMClient:
         }
     
     def extract_metrics(self, text: str, page_num: int, prompt: str, 
-                       timeout: int = 90, context: str = "general") -> List[Dict]:
+                   timeout: int = 90, context: str = "general") -> List[Dict]:
         """
         Extract metrics using LLM with standardized response parsing
         """
@@ -90,6 +90,11 @@ class LLMClient:
             return "You are an expert banking analyst. Focus on deposits, loans, branches, and capital metrics."
         elif context == "technology":
             return "You are an expert technology analyst. Focus on user metrics, recurring revenue, and growth indicators."
+
+        #### VERIFICATION BIT
+        elif context == "verification":
+            return "You are an independent verification agent. Rigorously challenge and verify metric claims. Be thorough and skeptical."
+            
         else:
             return "You are an expert financial analyst. Extract all relevant financial and operational metrics."
     

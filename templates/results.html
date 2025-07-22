@@ -25,14 +25,35 @@
             </div>
         </header>
 
+        <div class="verification-summary">
+            <h2><i class="fas fa-shield-check"></i> Verification Summary</h2>
+            <div class="verification-stats">
+                <div class="stat-item verified">
+                    <span class="count">{{ data.verification_summary.verified_count }}</span>
+                    <span class="label">Verified</span>
+                </div>
+                <div class="stat-item disputed">
+                    <span class="count">{{ data.verification_summary.disputed_count }}</span>
+                    <span class="label">Disputed</span>
+                </div>
+                <div class="stat-item rate">
+                    <span class="count">{{ "{:.0%}".format(data.verification_summary.verification_rate) }}</span>
+                    <span class="label">Success Rate</span>
+                </div>
+            </div>
+        </div>
+        
         <!-- Key Metrics Dashboard -->
         <div class="metrics-dashboard">
             <!-- Universal Metrics -->
             <div class="metrics-section">
                 <h2><i class="fas fa-chart-bar"></i> Financial Overview</h2>
                 <div class="metrics-grid">
-                    {% for metric_name, metric_data in data.universal_metrics.items() %}
-                    <div class="metric-card">
+                    {% for metric_name, metric_data in data.verified_metrics.items() %}
+                    <div class="metric-card verified-metric">
+                        <div class="verification-badge verified">
+                            <i class="fas fa-check-circle"></i> Verified
+                        </div>
                         <div class="metric-icon">
                             <i class="fas fa-euro-sign"></i>
                         </div>
@@ -48,6 +69,21 @@
                     {% endfor %}
                 </div>
             </div>
+            
+            {% if data.disputed_metrics %}
+            <div class="metrics-section disputed-section">
+                <h2><i class="fas fa-exclamation-triangle"></i> Metrics Requiring Review</h2>
+                {% for metric_name, metric_data in data.disputed_metrics.items() %}
+                <div class="metric-card disputed-metric">
+                    <div class="verification-badge disputed">
+                        <i class="fas fa-exclamation-triangle"></i> Disputed
+                    </div>
+                    <!-- ... metric display with conflict notes ... -->
+                    <div class="conflict-note">{{ metric_data.notes }}</div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
 
             <!-- Industry-Specific Metrics -->
             <div class="metrics-section">

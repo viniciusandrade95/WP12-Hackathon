@@ -9,6 +9,9 @@ import tempfile
 import requests
 from werkzeug.utils import secure_filename
 from pathlib import Path
+import threading
+import uuid
+from datetime import datetime
 
 # Import refactored components
 from core.document_processor import DocumentProcessor
@@ -29,10 +32,16 @@ def index():
     """Main dashboard page"""
     return render_template('index.html')
 
+# Add this to your app.py
+processing_status = {}  # In-memory storage for processing status
+
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    """Handle file upload or URL submission with proper error handling"""
+    """Handle file upload with asynchronous processing"""
     try:
+        # Generate unique processing ID
+        process_id = str(uuid.uuid4())
+        
         # Handle file upload
         if 'file' in request.files and request.files['file'].filename:
             file = request.files['file']
@@ -41,90 +50,60 @@ def upload_file():
                 filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
                 file.save(filepath)
                 
-                try:
-                    # Process document with unified processor
-                    results = processor.process_document(filepath)
-                    
-                    if results.get('success'):
-                        return jsonify({
-                            'success': True,
-                            'document_id': results['document_id'],
-                            'redirect': url_for('results', doc_id=results['document_id'])
-                        })
-                    else:
-                        return jsonify({
-                            'success': False, 
-                            'error': results.get('error', 'Processing failed')
-                        })
-                        
-                finally:
-                    # Clean up uploaded file
-                    if os.path.exists(filepath):
-                        os.remove(filepath)
+                # Initialize processing status
+                processing_status[process_id] = {
+                    'status': 'processing',
+                    'progress': 0,
+                    'message': 'Starting analysis...',
+                    'document_id': None,
+                    'error': None,
+                    'created_at': datetime.now()
+                }
+                
+                # Start background processing
+                thread = threading.Thread(
+                    target=process_document_async,
+                    args=(filepath, process_id)
+                )
+                thread.daemon = True
+                thread.start()
+                
+                return jsonify({
+                    'success': True,
+                    'process_id': process_id,
+                    'status': 'processing',
+                    'message': 'Document upload successful. Processing started...'
+                })
         
         # Handle URL submission
         elif 'url' in request.form and request.form['url']:
             url = request.form['url']
+            process_id = str(uuid.uuid4())
             
-            # Download PDF from URL
-            try:
-                response = requests.get(url, timeout=30)
-                response.raise_for_status()
-                
-                # Validate content type
-                content_type = response.headers.get('content-type', '')
-                if 'pdf' not in content_type.lower():
-                    return jsonify({
-                        'success': False, 
-                        'error': 'URL does not point to a PDF file'
-                    })
-                
-                # Save temporary file
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
-                    tmp_file.write(response.content)
-                    tmp_filepath = tmp_file.name
-                
-                try:
-                    # Process document
-                    results = processor.process_document(tmp_filepath)
-                    
-                    if results.get('success'):
-                        return jsonify({
-                            'success': True,
-                            'document_id': results['document_id'],
-                            'redirect': url_for('results', doc_id=results['document_id'])
-                        })
-                    else:
-                        return jsonify({
-                            'success': False, 
-                            'error': results.get('error', 'Processing failed')
-                        })
-                        
-                finally:
-                    # Clean up temporary file
-                    if os.path.exists(tmp_filepath):
-                        os.unlink(tmp_filepath)
-                        
-            except requests.exceptions.ConnectionError:
-                return jsonify({
-                    'success': False, 
-                    'error': 'Failed to connect to the URL'
-                })
-            except requests.exceptions.Timeout:
-                return jsonify({
-                    'success': False, 
-                    'error': 'Request timeout - URL took too long to respond'
-                })
-            except requests.exceptions.HTTPError as e:
-                return jsonify({
-                    'success': False, 
-                    'error': f'HTTP error: {str(e)}'
-                })
-            except requests.exceptions.RequestException as e:
-                return jsonify({
-                    'success': False, 
-                    'error': f'Failed to download PDF: {str(e)}'
-                })
+            # Initialize processing status
+            processing_status[process_id] = {
+                'status': 'downloading',
+                'progress': 0,
+                'message': 'Downloading PDF...',
+                'document_id': None,
+                'error': None,
+                'created_at': datetime.now()
+            }
+            
+            # Start background processing
+            thread = threading.Thread(
+                target=process_url_async,
+                args=(url, process_id)
+            )
+            thread.daemon = True
+            thread.start()
+            
+            return jsonify({
+                'success': True,
+                'process_id': process_id,
+                'status': 'processing',
+                'message': 'Download started. Processing will begin shortly...'
+            })
         
         return jsonify({
             'success': False, 
@@ -135,8 +114,136 @@ def upload_file():
         app.logger.error(f"Upload error: {str(e)}")
         return jsonify({
             'success': False, 
-            'error': 'An unexpected error occurred during processing'
+            'error': 'An unexpected error occurred during upload'
         })
+
+def process_document_async(filepath, process_id):
+    """Process document in background thread"""
+    try:
+        # Update status
+        processing_status[process_id].update({
+            'status': 'processing',
+            'progress': 10,
+            'message': 'Analyzing document structure...'
+        })
+        
+        # Process document
+        results = processor.process_document(filepath)
+        
+        if results.get('success'):
+            processing_status[process_id].update({
+                'status': 'completed',
+                'progress': 100,
+                'message': 'Analysis completed successfully!',
+                'document_id': results['document_id']
+            })
+        else:
+            processing_status[process_id].update({
+                'status': 'failed',
+                'progress': 0,
+                'message': 'Analysis failed',
+                'error': results.get('error', 'Processing failed')
+            })
+            
+    except Exception as e:
+        processing_status[process_id].update({
+            'status': 'failed',
+            'progress': 0,
+            'message': 'Processing failed',
+            'error': str(e)
+        })
+    finally:
+        # Clean up file
+        if os.path.exists(filepath):
+            try:
+                os.remove(filepath)
+            except:
+                pass
+
+def process_url_async(url, process_id):
+    """Process URL in background thread"""
+    try:
+        # Update status
+        processing_status[process_id].update({
+            'status': 'downloading',
+            'progress': 5,
+            'message': 'Downloading PDF from URL...'
+        })
+        
+        # Download PDF
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        
+        # Validate content type
+        content_type = response.headers.get('content-type', '')
+        if 'pdf' not in content_type.lower():
+            processing_status[process_id].update({
+                'status': 'failed',
+                'error': 'URL does not point to a PDF file'
+            })
+            return
+        
+        # Save temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+            tmp_file.write(response.content)
+            tmp_filepath = tmp_file.name
+        
+        # Update status
+        processing_status[process_id].update({
+            'status': 'processing',
+            'progress': 15,
+            'message': 'Download complete. Starting analysis...'
+        })
+        
+        # Process document
+        results = processor.process_document(tmp_filepath)
+        
+        if results.get('success'):
+            processing_status[process_id].update({
+                'status': 'completed',
+                'progress': 100,
+                'message': 'Analysis completed successfully!',
+                'document_id': results['document_id']
+            })
+        else:
+            processing_status[process_id].update({
+                'status': 'failed',
+                'progress': 0,
+                'message': 'Analysis failed',
+                'error': results.get('error', 'Processing failed')
+            })
+            
+    except Exception as e:
+        processing_status[process_id].update({
+            'status': 'failed',
+            'progress': 0,
+            'message': 'Processing failed',
+            'error': str(e)
+        })
+    finally:
+        # Clean up temporary file
+        if 'tmp_filepath' in locals() and os.path.exists(tmp_filepath):
+            try:
+                os.unlink(tmp_filepath)
+            except:
+                pass
+
+@app.route('/api/status/<process_id>')
+def get_processing_status(process_id):
+    """Get real-time processing status"""
+    if process_id not in processing_status:
+        return jsonify({'error': 'Process not found'}), 404
+    
+    status = processing_status[process_id]
+    
+    # Clean up old completed processes (older than 1 hour)
+    if status['status'] in ['completed', 'failed']:
+        age = datetime.now() - status['created_at']
+        if age.total_seconds() > 3600:  # 1 hour
+            del processing_status[process_id]
+    
+    return jsonify(status)
+
 
 @app.route('/results/<int:doc_id>')
 def results(doc_id):

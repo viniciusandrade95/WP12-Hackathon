@@ -576,3 +576,84 @@ body {
     background: rgba(255, 255, 255, 0.8);
     border-radius: var(--border-radius);
 }
+
+/* ADD verification-related styles */
+
+/* Verification Summary */
+.verification-summary {
+    background: white;
+    border-radius: var(--border-radius);
+    padding: 2rem;
+    margin-bottom: 2rem;
+    box-shadow: var(--shadow);
+}
+
+.verification-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.stat-item {
+    text-align: center;
+    padding: 1rem;
+    border-radius: 8px;
+}
+
+.stat-item.verified { background: rgba(34, 197, 94, 0.1); color: #22c55e; }
+.stat-item.disputed { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+.stat-item.rate { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
+
+/* Verification Badges */
+.verification-badge {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.verification-badge.verified {
+    background: #22c55e;
+    color: white;
+}
+
+.verification-badge.disputed {
+    background: #ef4444;
+    color: white;
+}
+
+/* Metric Card Modifications */
+.metric-card {
+    position: relative; /* For positioning badges */
+}
+
+.metric-card.verified-metric {
+    border-left: 4px solid #22c55e;
+}
+
+.metric-card.disputed-metric {
+    border-left: 4px solid #ef4444;
+    background: rgba(239, 68, 68, 0.05);
+}
+
+.conflict-note {
+    margin-top: 0.5rem;
+    padding: 0.5rem;
+    background: rgba(239, 68, 68, 0.1);
+    border-radius: 4px;
+    font-size: 0.8rem;
+    color: #dc2626;
+}
+
+/* Disputed Metrics Section */
+.disputed-section {
+    border: 2px solid #fed7d7;
+    background: rgba(254, 215, 215, 0.1);
+}

@@ -136,6 +136,22 @@ class DatabaseManager:
                 FOREIGN KEY (document_id) REFERENCES documents (id)
             )
         """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS metric_verification (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                metric_id INTEGER,
+                verification_status TEXT,  -- 'verified', 'disputed', 'uncertain'
+                original_confidence REAL,
+                verification_confidence REAL,
+                consensus_confidence REAL,
+                original_source_quote TEXT,
+                verification_source_quote TEXT,
+                conflict_analysis TEXT,
+                resolution_reasoning TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (metric_id) REFERENCES financial_metrics (id)
+            )
+        """)
         
         # Create indexes for performance
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_metrics_document ON financial_metrics(document_id)")

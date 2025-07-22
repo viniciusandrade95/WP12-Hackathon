@@ -1,9 +1,11 @@
-// Modern Dashboard JavaScript
+// Updated Dashboard JavaScript for Async Processing
 class DashboardManager {
     constructor() {
         this.initializeElements();
         this.setupEventListeners();
         this.loadRecentAnalyses();
+        this.currentProcessId = null;
+        this.statusInterval = null;
     }
 
     initializeElements() {
@@ -18,17 +20,27 @@ class DashboardManager {
 
     setupEventListeners() {
         // File upload events
-        this.uploadArea.addEventListener('click', () => this.fileInput.click());
-        this.uploadArea.addEventListener('dragover', this.handleDragOver.bind(this));
-        this.uploadArea.addEventListener('dragleave', this.handleDragLeave.bind(this));
-        this.uploadArea.addEventListener('drop', this.handleDrop.bind(this));
-        this.fileInput.addEventListener('change', this.handleFileSelect.bind(this));
+        if (this.uploadArea) {
+            this.uploadArea.addEventListener('click', () => this.fileInput.click());
+            this.uploadArea.addEventListener('dragover', this.handleDragOver.bind(this));
+            this.uploadArea.addEventListener('dragleave', this.handleDragLeave.bind(this));
+            this.uploadArea.addEventListener('drop', this.handleDrop.bind(this));
+        }
+        
+        if (this.fileInput) {
+            this.fileInput.addEventListener('change', this.handleFileSelect.bind(this));
+        }
 
         // URL analysis
-        this.analyzeBtn.addEventListener('click', this.analyzeUrl.bind(this));
-        this.urlInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') this.analyzeUrl();
-        });
+        if (this.analyzeBtn) {
+            this.analyzeBtn.addEventListener('click', this.analyzeUrl.bind(this));
+        }
+        
+        if (this.urlInput) {
+            this.urlInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') this.analyzeUrl();
+            });
+        }
     }
 
     handleDragOver(e) {
@@ -66,7 +78,7 @@ class DashboardManager {
         const formData = new FormData();
         formData.append('file', file);
         
-        this.startProcessing(`Analyzing ${file.name}...`);
+        this.startProcessing(`Uploading ${file.name}...`);
         this.uploadDocument(formData);
     }
 
@@ -80,7 +92,7 @@ class DashboardManager {
         const formData = new FormData();
         formData.append('url', url);
         
-        this.startProcessing('Downloading and analyzing document...');
+        this.startProcessing('Starting URL analysis...');
         this.uploadDocument(formData);
     }
 
@@ -89,84 +101,227 @@ class DashboardManager {
             method: 'POST',
             body: formData
         })
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        })
         .then(data => {
-            if (data.success) {
-                this.simulateProgress(data.redirect);
+            console.log('Upload response:', data);
+            
+            if (data.success && data.process_id) {
+                this.currentProcessId = data.process_id;
+                this.startStatusPolling();
             } else {
-                this.showError(data.error || 'Processing failed');
+                this.showError(data.error || 'Upload failed');
             }
         })
         .catch(error => {
+            console.error('Upload error:', error);
             this.showError('Upload failed: ' + error.message);
         });
     }
 
+    startStatusPolling() {
+        if (this.statusInterval) {
+            clearInterval(this.statusInterval);
+        }
+
+        this.statusInterval = setInterval(() => {
+            this.checkProcessingStatus();
+        }, 2000); // Check every 2 seconds
+
+        // Also check immediately
+        this.checkProcessingStatus();
+    }
+
+    checkProcessingStatus() {
+        if (!this.currentProcessId) return;
+
+        fetch(`/api/status/${this.currentProcessId}`)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`Status check failed: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(status => {
+            console.log('Processing status:', status);
+            
+            // Update UI
+            this.updateProcessingUI(status);
+            
+            // Handle completion
+            if (status.status === 'completed') {
+                this.handleProcessingComplete(status);
+            } else if (status.status === 'failed') {
+                this.handleProcessingFailed(status);
+            }
+        })
+        .catch(error => {
+            console.error('Status check error:', error);
+            // Don't show error immediately, might be temporary
+        });
+    }
+
+    updateProcessingUI(status) {
+        // Update progress bar
+        if (this.progressFill) {
+            const progress = Math.max(status.progress || 0, 10); // Minimum 10%
+            this.progressFill.style.width = progress + '%';
+        }
+
+        // Update status message
+        if (this.processingStatus) {
+            this.processingStatus.textContent = status.message || 'Processing...';
+        }
+
+        // Update step indicators based on progress
+        this.updateStepIndicators(status.progress || 0);
+    }
+
+    updateStepIndicators(progress) {
+        const steps = [
+            { id: 'step1', threshold: 0 },
+            { id: 'step2', threshold: 25 },
+            { id: 'step3', threshold: 50 },
+            { id: 'step4', threshold: 75 }
+        ];
+
+        steps.forEach(step => {
+            const element = document.getElementById(step.id);
+            if (element) {
+                if (progress >= step.threshold) {
+                    element.classList.add('active');
+                } else {
+                    element.classList.remove('active');
+                }
+            }
+        });
+    }
+
+    handleProcessingComplete(status) {
+        // Clear polling
+        if (this.statusInterval) {
+            clearInterval(this.statusInterval);
+            this.statusInterval = null;
+        }
+
+        // Show completion
+        if (this.processingStatus) {
+            this.processingStatus.textContent = 'Analysis completed! Redirecting...';
+        }
+
+        // Save to recent analyses
+        this.saveToRecent({
+            id: status.document_id,
+            company: 'Analysis Complete',
+            industry: 'Unknown',
+            metrics: 'Processing',
+            date: new Date().toLocaleDateString()
+        });
+
+        // Redirect after short delay
+        setTimeout(() => {
+            window.location.href = `/results/${status.document_id}`;
+        }, 1500);
+    }
+
+    handleProcessingFailed(status) {
+        // Clear polling
+        if (this.statusInterval) {
+            clearInterval(this.statusInterval);
+            this.statusInterval = null;
+        }
+
+        // Show error
+        this.showError(status.error || 'Processing failed');
+    }
+
     startProcessing(message) {
-        this.processingStatus.textContent = message;
-        this.processingSection.style.display = 'block';
-        this.uploadArea.style.display = 'none';
+        if (this.processingStatus) {
+            this.processingStatus.textContent = message;
+        }
+        if (this.processingSection) {
+            this.processingSection.style.display = 'block';
+        }
+        if (this.uploadArea) {
+            this.uploadArea.style.display = 'none';
+        }
         this.resetProgress();
     }
 
-    simulateProgress(redirectUrl) {
-        const steps = [
-            { id: 'step1', message: 'Analyzing document structure...', progress: 25 },
-            { id: 'step2', message: 'Detecting industry type...', progress: 50 },
-            { id: 'step3', message: 'Extracting key metrics...', progress: 75 },
-            { id: 'step4', message: 'Generating business intelligence...', progress: 100 }
-        ];
-
-        let currentStep = 0;
-        const stepInterval = setInterval(() => {
-            if (currentStep < steps.length) {
-                const step = steps[currentStep];
-                
-                // Update progress
-                this.progressFill.style.width = step.progress + '%';
-                this.processingStatus.textContent = step.message;
-                
-                // Update step indicators
-                document.getElementById(step.id).classList.add('active');
-                
-                currentStep++;
-            } else {
-                clearInterval(stepInterval);
-                setTimeout(() => {
-                    window.location.href = redirectUrl;
-                }, 1000);
-            }
-        }, 2000);
-    }
-
     resetProgress() {
-        this.progressFill.style.width = '0%';
+        if (this.progressFill) {
+            this.progressFill.style.width = '0%';
+        }
+        
         document.querySelectorAll('.step').forEach(step => {
             step.classList.remove('active');
         });
-        document.getElementById('step1').classList.add('active');
+        
+        const step1 = document.getElementById('step1');
+        if (step1) {
+            step1.classList.add('active');
+        }
     }
 
     showError(message) {
+        // Clear any polling
+        if (this.statusInterval) {
+            clearInterval(this.statusInterval);
+            this.statusInterval = null;
+        }
+
         // Reset UI
-        this.processingSection.style.display = 'none';
-        this.uploadArea.style.display = 'block';
+        if (this.processingSection) {
+            this.processingSection.style.display = 'none';
+        }
+        if (this.uploadArea) {
+            this.uploadArea.style.display = 'block';
+        }
         
-        // Show error (you could implement a toast notification here)
+        // Show error
         alert('Error: ' + message);
+        
+        // Reset process ID
+        this.currentProcessId = null;
     }
 
     loadRecentAnalyses() {
-        // Load recent analyses from localStorage or API
         const recentGrid = document.getElementById('recentGrid');
-        const recent = JSON.parse(localStorage.getItem('recentAnalyses') || '[]');
+        if (!recentGrid) return;
         
-        if (recent.length === 0) {
+        // Try to load from API first
+        fetch('/api/recent')
+        .then(response => {
+            if (response.ok) {
+                return response.json();
+            }
+            throw new Error('Failed to load recent analyses');
+        })
+        .then(analyses => {
+            this.displayRecentAnalyses(analyses);
+        })
+        .catch(error => {
+            console.error('Failed to load recent analyses:', error);
+            // Fallback to localStorage
+            const recent = JSON.parse(localStorage.getItem('recentAnalyses') || '[]');
+            this.displayRecentAnalyses(recent);
+        });
+    }
+
+    displayRecentAnalyses(analyses) {
+        const recentGrid = document.getElementById('recentGrid');
+        if (!recentGrid) return;
+
+        if (analyses.length === 0) {
             recentGrid.innerHTML = '<p style="color: rgba(255,255,255,0.7); text-align: center;">No recent analyses</p>';
             return;
         }
 
-        recentGrid.innerHTML = recent.map(analysis => `
+        recentGrid.innerHTML = analyses.map(analysis => `
             <div class="recent-item" onclick="window.location.href='/results/${analysis.id}'">
                 <h3>${analysis.company}</h3>
                 <div class="industry-badge" style="font-size: 0.8rem; margin: 0.5rem 0;">
@@ -190,20 +345,4 @@ class DashboardManager {
 // Initialize dashboard when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
     new DashboardManager();
-});
-
-// Add some nice visual effects
-document.addEventListener('DOMContentLoaded', () => {
-    // Animate metric cards on scroll
-    const observeElements = document.querySelectorAll('.metric-card, .insight-card');
-    
-    const observer = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-            if (entry.isIntersecting) {
-                entry.target.style.animation = 'fadeIn 0.6s ease-out';
-            }
-        });
-    });
-
-    observeElements.forEach(el => observer.observe(el));
 });
