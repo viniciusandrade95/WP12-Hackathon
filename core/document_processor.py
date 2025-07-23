@@ -61,16 +61,16 @@ class MetricExtractionDebugger:
         # Step 2: Test basic prompt
         print("\n2. TESTING BASIC EXTRACTION PROMPT:")
         basic_prompt = """
-Extract ALL numerical values from this text. Look for:
-- Any number followed by "million", "billion", "€", "$", "%"
-- Any metric name followed by a number
-- Revenue, costs, profits, assets, employees, etc.
+                        Extract ALL numerical values from this text. Look for:
+                        - Any number followed by "million", "billion", "€", "$", "%"
+                        - Any metric name followed by a number
+                        - Revenue, costs, profits, assets, employees, etc.
 
-Return as JSON array:
-[{"metric_name": "name", "value": number, "unit": "unit", "period": "period"}]
+                        Return as JSON array:
+                        [{"metric_name": "name", "value": number, "unit": "unit", "period": "period"}]
 
-Return ONLY the JSON array, nothing else.
-"""
+                        Return ONLY the JSON array, nothing else.
+                        """
         
         print("   📝 Sending basic prompt to LLM...")
         try:
@@ -509,28 +509,28 @@ class DocumentProcessor:
         industry_info = self.knowledge_base.get_industry_info(industry)
         
         base_prompt = """
-    IMPORTANT: You MUST return ONLY a JSON array. No explanations, no text, ONLY JSON.
+                        IMPORTANT: You MUST return ONLY a JSON array. No explanations, no text, ONLY JSON.
 
-    Extract ALL numerical metrics from this text. Include:
-    1. Any number with currency (€, $, EUR, USD)
-    2. Any number with units (million, billion, %, thousand)
-    3. Any metric name followed by a number
-    4. Financial figures, operational statistics, employee counts
+                        Extract ALL numerical metrics from this text. Include:
+                        1. Any number with currency (€, $, EUR, USD)
+                        2. Any number with units (million, billion, %, thousand)
+                        3. Any metric name followed by a number
+                        4. Financial figures, operational statistics, employee counts
 
-    REQUIRED FORMAT - Return ONLY this JSON structure:
-    [
-    {"metric_name": "Total Revenue", "value": 1234.5, "unit": "million EUR", "period": "2024"},
-    {"metric_name": "Net Income", "value": 567.8, "unit": "million EUR", "period": "2024"}
-    ]
+                        REQUIRED FORMAT - Return ONLY this JSON structure:
+                        [
+                        {"metric_name": "Total Revenue", "value": 1234.5, "unit": "million EUR", "period": "2024"},
+                        {"metric_name": "Net Income", "value": 567.8, "unit": "million EUR", "period": "2024"}
+                        ]
 
-    RULES:
-    - metric_name: descriptive name of what the number represents
-    - value: the numerical value ONLY (no currency symbols)
-    - unit: include currency and scale (e.g., "million EUR", "billion USD", "percentage")
-    - period: year or time period (e.g., "2024", "Q1 2024", "FY2023")
+                        RULES:
+                        - metric_name: descriptive name of what the number represents
+                        - value: the numerical value ONLY (no currency symbols)
+                        - unit: include currency and scale (e.g., "million EUR", "billion USD", "percentage")
+                        - period: year or time period (e.g., "2024", "Q1 2024", "FY2023")
 
-    Start your response with [ and end with ]
-    """
+                        Start your response with [ and end with ]
+                        """
         
         if industry != "other" and industry_info.get('key_metrics'):
             industry_metrics = ", ".join(list(industry_info['key_metrics'].keys())[:5])
