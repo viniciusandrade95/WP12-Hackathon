@@ -98,38 +98,88 @@ class LLMClient:
         else:
             return "You are an expert financial analyst. Extract all relevant financial and operational metrics."
     
+    # Fix 1: Update api_client.py to handle different response formats
+    # In api_client.py, update the _parse_metrics_response method:
+
     def _parse_metrics_response(self, content: str, page_num: int) -> List[Dict]:
         """
-        Parse LLM response and extract metrics in standardized format
+        Parse LLM response with better error handling and format detection
         """
         try:
-            # Find JSON array in response
+            # Debug: Print what we're receiving
+            print(f"    🔍 Raw response length: {len(content)} chars")
+            print(f"    🔍 Response preview: {content[:200]}...")
+            
+            # Try multiple JSON extraction strategies
+            metrics = []
+            
+            # Strategy 1: Look for JSON array
             json_start = content.find('[')
             json_end = content.rfind(']')
             
-            if json_start == -1 or json_end == -1:
-                return []
+            if json_start != -1 and json_end != -1:
+                json_str = content[json_start:json_end + 1]
+                try:
+                    data = json.loads(json_str)
+                    if isinstance(data, list):
+                        print(f"    ✅ Found JSON array with {len(data)} items")
+                    else:
+                        print(f"    ⚠️ JSON is not a list: {type(data)}")
+                        return []
+                except json.JSONDecodeError as e:
+                    print(f"    ❌ JSON parsing failed: {e}")
+                    # Try cleaning the JSON
+                    json_str = json_str.replace("'", '"')  # Replace single quotes
+                    json_str = re.sub(r',\s*}', '}', json_str)  # Remove trailing commas
+                    json_str = re.sub(r',\s*]', ']', json_str)
+                    try:
+                        data = json.loads(json_str)
+                        print(f"    ✅ Cleaned JSON parsed successfully")
+                    except:
+                        return []
+            else:
+                print(f"    ❌ No JSON array found in response")
+                # Strategy 2: Look for JSON objects separated by newlines
+                lines = content.strip().split('\n')
+                data = []
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith('{') and line.endswith('}'):
+                        try:
+                            obj = json.loads(line)
+                            data.append(obj)
+                        except:
+                            pass
+                
+                if data:
+                    print(f"    ✅ Found {len(data)} JSON objects in lines")
             
-            json_str = content[json_start:json_end + 1]
-            data = json.loads(json_str)
-            
-            if not isinstance(data, list):
-                return []
-            
-            # Standardize metric format
-            metrics = []
+            # Process the data
             for item in data:
                 if not isinstance(item, dict):
                     continue
-                    
-                # Extract required fields
-                metric_name = item.get("metric_name", "")
-                value = item.get("value", 0)
+                
+                # Be more flexible with field names
+                metric_name = (item.get("metric_name") or 
+                            item.get("metric") or 
+                            item.get("name") or "")
+                
+                value = (item.get("value") or 
+                        item.get("amount") or 
+                        item.get("number") or 0)
+                
+                # Try to convert string values to float
+                if isinstance(value, str):
+                    # Remove currency symbols and convert
+                    value = re.sub(r'[€$£,]', '', value)
+                    try:
+                        value = float(value)
+                    except:
+                        continue
                 
                 if not metric_name or not isinstance(value, (int, float)):
                     continue
                 
-                # Create standardized metric
                 metric = {
                     "metric": metric_name,
                     "value": float(value),
@@ -142,13 +192,13 @@ class LLMClient:
                 }
                 
                 metrics.append(metric)
-            
+                
+            print(f"    📊 Total metrics extracted: {len(metrics)}")
             return metrics
             
-        except json.JSONDecodeError as e:
-            print(f"    ❌ JSON parsing failed for page {page_num}: {e}")
-            return []
         except Exception as e:
-            print(f"    ❌ Response parsing failed for page {page_num}: {e}")
+            print(f"    ❌ Response parsing failed: {e}")
+            import traceback
+            traceback.print_exc()
             return []
 

@@ -301,5 +301,104 @@ def internal_error(error):
                          error="Internal server error", 
                          code=500), 500
 
+
+@app.route('/test-extraction')
+def test_extraction():
+    """Quick test endpoint"""
+    test_text = """
+    Total revenue for 2024 was €2,456.7 million, representing a growth of 15.3%.
+    Net income reached €345.2 million. The company has 12,500 employees.
+    Operating costs were €1,890.5 million.
+    """
+    
+    metrics = processor.llm_client.extract_metrics(
+        test_text, 1, 
+        "Extract metrics as JSON array: [{\"metric_name\": \"name\", \"value\": number, \"unit\": \"unit\", \"period\": \"period\"}]",
+        30, "test"
+    )
+    
+    return jsonify({
+        "test_text": test_text,
+        "metrics_found": len(metrics),
+        "metrics": metrics
+    })
+
+@app.route('/test-metrics')
+def test_metrics():
+    """Test if metrics extraction is working"""
+    cursor = db_manager.connection.cursor()
+    cursor.execute("""
+        SELECT COUNT(*) as total, 
+               MAX(created_at) as latest 
+        FROM financial_metrics
+    """)
+    result = cursor.fetchone()
+    
+    return jsonify({
+        "total_metrics_in_db": result[0],
+        "last_extraction": str(result[1]) if result[1] else "Never"
+    })
+
+
+# Add this to your app.py for debugging
+
+@app.route('/debug/<int:doc_id>')
+def debug_document(doc_id):
+    """Debug endpoint to see what's in the database"""
+    cursor = db_manager.connection.cursor()
+    
+    # Get all metrics for this document
+    cursor.execute("""
+        SELECT 
+            fm.metric_name,
+            fm.metric_type,
+            fm.value,
+            fm.unit,
+            fm.period,
+            fm.confidence,
+            fm.page_number,
+            mv.verification_status
+        FROM financial_metrics fm
+        LEFT JOIN metric_verification mv ON fm.id = mv.metric_id
+        WHERE fm.document_id = ?
+        ORDER BY fm.page_number, fm.metric_name
+    """, (doc_id,))
+    
+    metrics = cursor.fetchall()
+    
+    # Group by type
+    by_type = {}
+    for m in metrics:
+        metric_type = m[1] or 'unknown'
+        if metric_type not in by_type:
+            by_type[metric_type] = []
+        by_type[metric_type].append({
+            'name': m[0],
+            'value': m[2],
+            'unit': m[3],
+            'period': m[4],
+            'confidence': m[5],
+            'page': m[6],
+            'verification': m[7] or 'none'
+        })
+    
+    # Get insights
+    cursor.execute("""
+        SELECT concept, insight_text, confidence
+        FROM business_intelligence
+        WHERE document_id = ?
+    """, (doc_id,))
+    
+    insights = cursor.fetchall()
+    
+    return jsonify({
+        'document_id': doc_id,
+        'total_metrics': len(metrics),
+        'metrics_by_type': by_type,
+        'type_counts': {k: len(v) for k, v in by_type.items()},
+        'insights_count': len(insights),
+        'insights': [{'concept': i[0], 'text': i[1], 'confidence': i[2]} for i in insights]
+    })
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

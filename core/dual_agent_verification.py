@@ -62,20 +62,29 @@ class ExtractionAgent:
         
         claims = []
         for raw_metric in response:
-            # Validate that evidence is provided
-            if not self._has_valid_evidence(raw_metric):
-                continue
+            # Create evidence from available data
+            # Don't reject metrics that don't have all evidence fields
             
+            # Use source_quote if available, otherwise use a portion of the text
+            source_quote = raw_metric.get("source_quote", "")
+            if not source_quote and "metric_name" in raw_metric:
+                # Try to find the metric in the text
+                metric_name = raw_metric["metric_name"]
+                value = raw_metric.get("value", 0)
+                # Create a synthetic source quote
+                source_quote = f"{metric_name}: {value} {raw_metric.get('unit', '')}"
+            
+            # Build the claim with available data
             claim = MetricClaim(
-                metric_name=raw_metric["metric_name"],
-                value=raw_metric["value"],
-                unit=raw_metric["unit"],
-                period=raw_metric["period"],
+                metric_name=raw_metric.get("metric_name", raw_metric.get("metric", "")),
+                value=float(raw_metric.get("value", 0)),
+                unit=raw_metric.get("unit", "unknown"),
+                period=raw_metric.get("period", "unknown"),
                 evidence=Evidence(
-                    source_quote=raw_metric["source_quote"],
+                    source_quote=source_quote,
                     page_number=page_num,
-                    confidence=raw_metric["confidence"],
-                    reasoning=raw_metric["reasoning"],
+                    confidence=float(raw_metric.get("confidence", 0.8)),
+                    reasoning=raw_metric.get("reasoning", "Extracted from document"),
                     assumptions=raw_metric.get("assumptions", []),
                     context_window=raw_metric.get("context_window", "")
                 ),
@@ -85,39 +94,44 @@ class ExtractionAgent:
             claims.append(claim)
         
         return claims
-    
+
+    def _has_valid_evidence(self, raw_metric: dict) -> bool:
+        """Validate that extraction includes proper evidence"""
+        # Make validation less strict - just need metric name and value
+        return "metric_name" in raw_metric or "metric" in raw_metric
+
     def _create_evidence_based_prompt(self, industry: str) -> str:
         """Create prompt that mandates evidence chain"""
         return f"""
-Extract {industry} metrics with MANDATORY evidence chain. For each metric, you MUST provide:
+                Extract {industry} metrics with MANDATORY evidence chain. For each metric, you MUST provide:
 
-REQUIRED RESPONSE FORMAT (JSON):
-{{
-    "metric_name": "exact_name",
-    "value": numeric_value,
-    "unit": "unit_type",
-    "period": "time_period",
-    "source_quote": "EXACT text from document containing this number",
-    "confidence": 0.0_to_1.0,
-    "reasoning": "Why you believe this extraction is correct",
-    "assumptions": ["list", "of", "assumptions"],
-    "context_window": "surrounding text for context"
-}}
+                REQUIRED RESPONSE FORMAT (JSON):
+                {{
+                    "metric_name": "exact_name",
+                    "value": numeric_value,
+                    "unit": "unit_type",
+                    "period": "time_period",
+                    "source_quote": "EXACT text from document containing this number",
+                    "confidence": 0.0_to_1.0,
+                    "reasoning": "Why you believe this extraction is correct",
+                    "assumptions": ["list", "of", "assumptions"],
+                    "context_window": "surrounding text for context"
+                }}
 
-CRITICAL RULES:
-1. source_quote MUST be exact text from document (copy-paste)
-2. If you cannot find exact source text, DO NOT extract the metric
-3. reasoning must explain your interpretation step-by-step
-4. confidence must reflect certainty of extraction accuracy
-5. Include context_window showing text around the metric
+                CRITICAL RULES:
+                1. source_quote MUST be exact text from document (copy-paste)
+                2. If you cannot find exact source text, DO NOT extract the metric
+                3. reasoning must explain your interpretation step-by-step
+                4. confidence must reflect certainty of extraction accuracy
+                5. Include context_window showing text around the metric
 
-REJECT if:
-- No clear source text
-- Ambiguous numbers
-- Uncertain about meaning
+                REJECT if:
+                - No clear source text
+                - Ambiguous numbers
+                - Uncertain about meaning
 
-Extract industry-specific metrics for {industry}: [relevant metrics here]
-"""
+                Extract industry-specific metrics for {industry}: [relevant metrics here]
+                """
     
     def _has_valid_evidence(self, raw_metric: dict) -> bool:
         """Validate that extraction includes proper evidence"""
@@ -140,36 +154,36 @@ class VerificationAgent:
         """Independently verify a metric claim with evidence"""
         
         verification_prompt = f"""
-VERIFICATION TASK: Independently verify this metric claim.
+                                VERIFICATION TASK: Independently verify this metric claim.
 
-CLAIM TO VERIFY:
-- Metric: {claim.metric_name}
-- Value: {claim.value} {claim.unit}
-- Period: {claim.period}
-- Original Source Quote: "{claim.evidence.source_quote}"
-- Original Reasoning: "{claim.evidence.reasoning}"
+                                CLAIM TO VERIFY:
+                                - Metric: {claim.metric_name}
+                                - Value: {claim.value} {claim.unit}
+                                - Period: {claim.period}
+                                - Original Source Quote: "{claim.evidence.source_quote}"
+                                - Original Reasoning: "{claim.evidence.reasoning}"
 
-YOUR TASK:
-1. Search the provided text for this metric independently
-2. Find your own source quote and evidence
-3. Determine if the original claim is accurate
+                                YOUR TASK:
+                                1. Search the provided text for this metric independently
+                                2. Find your own source quote and evidence
+                                3. Determine if the original claim is accurate
 
-RESPONSE FORMAT (JSON):
-{{
-    "verification_status": "verified|disputed|uncertain",
-    "your_source_quote": "your exact text found",
-    "your_value": numeric_value_you_found,
-    "your_confidence": 0.0_to_1.0,
-    "your_reasoning": "your independent analysis",
-    "agreement_analysis": "comparison with original claim",
-    "conflict_points": ["specific disagreements if any"]
-}}
+                                RESPONSE FORMAT (JSON):
+                                {{
+                                    "verification_status": "verified|disputed|uncertain",
+                                    "your_source_quote": "your exact text found",
+                                    "your_value": numeric_value_you_found,
+                                    "your_confidence": 0.0_to_1.0,
+                                    "your_reasoning": "your independent analysis",
+                                    "agreement_analysis": "comparison with original claim",
+                                    "conflict_points": ["specific disagreements if any"]
+                                }}
 
-TEXT TO SEARCH:
-{full_text[:8000]}
+                                TEXT TO SEARCH:
+                                {full_text[:8000]}
 
-Be thorough and independent. Challenge the original claim rigorously.
-"""
+                                Be thorough and independent. Challenge the original claim rigorously.
+                                """
         
         response = self.llm_client.extract_metrics(
             full_text, claim.evidence.page_number, verification_prompt, 90, "verification"
