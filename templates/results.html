@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ data.company_profile.name }} - Analysis Results</title>
+    <title>{% if data and data.company_profile %}{{ data.company_profile.name }}{% else %}Analysis Results{% endif %} - Results</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
 </head>
@@ -16,80 +16,127 @@
                     <i class="fas fa-arrow-left"></i> New Analysis
                 </a>
             </div>
+            {% if data and data.company_profile %}
             <div class="company-header">
                 <h1>{{ data.company_profile.name }}</h1>
                 <div class="industry-badge">
                     <i class="fas fa-industry"></i>
-                    {{ data.company_profile.detected_industry.title() }}
+                    {{ data.company_profile.detected_industry.title() if data.company_profile.detected_industry else 'Unknown' }}
                 </div>
             </div>
+            {% else %}
+            <div class="company-header">
+                <h1>Analysis Results</h1>
+                <div class="industry-badge">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    Error Loading Data
+                </div>
+            </div>
+            {% endif %}
         </header>
 
+        {% if error %}
+        <!-- Error Display -->
+        <div class="metrics-section">
+            <h2><i class="fas fa-exclamation-triangle"></i> Error</h2>
+            <div style="padding: 2rem; background: #fee; border: 1px solid #fcc; border-radius: 8px; color: #c33;">
+                <p><strong>Failed to load analysis results:</strong></p>
+                <p>{{ error }}</p>
+                <p><a href="{{ url_for('index') }}">← Try uploading another document</a></p>
+            </div>
+        </div>
+        {% elif not data %}
+        <!-- No Data Display -->
+        <div class="metrics-section">
+            <h2><i class="fas fa-exclamation-triangle"></i> No Data</h2>
+            <div style="padding: 2rem; background: #fef; border: 1px solid #fcf; border-radius: 8px; color: #633;">
+                <p>No analysis data available for this document.</p>
+                <p><a href="{{ url_for('index') }}">← Try uploading another document</a></p>
+            </div>
+        </div>
+        {% else %}
+
+        <!-- Success Display -->
         <div class="verification-summary">
-            <h2><i class="fas fa-shield-check"></i> Verification Summary</h2>
+            <h2><i class="fas fa-chart-bar"></i> Analysis Summary</h2>
             <div class="verification-stats">
                 <div class="stat-item verified">
-                    <span class="count">{{ data.verification_summary.verified_count }}</span>
-                    <span class="label">Verified</span>
+                    <span class="count">{{ data.summary.total_metrics if data.summary else '0' }}</span>
+                    <span class="label">Total Metrics</span>
                 </div>
                 <div class="stat-item disputed">
-                    <span class="count">{{ data.verification_summary.disputed_count }}</span>
-                    <span class="label">Disputed</span>
+                    <span class="count">{{ data.summary.financial_metrics_count if data.summary else '0' }}</span>
+                    <span class="label">Financial</span>
                 </div>
                 <div class="stat-item rate">
-                    <span class="count">{{ "{:.0%}".format(data.verification_summary.verification_rate) }}</span>
-                    <span class="label">Success Rate</span>
+                    <span class="count">{{ data.summary.operational_metrics_count if data.summary else '0' }}</span>
+                    <span class="label">Operational</span>
+                </div>
+                <div class="stat-item rate">
+                    <span class="count">{{ data.company_profile.pages_processed if data.company_profile else '0' }}</span>
+                    <span class="label">Pages Processed</span>
                 </div>
             </div>
         </div>
         
-        <!-- Key Metrics Dashboard -->
+        <!-- Financial Metrics Dashboard -->
         <div class="metrics-dashboard">
-            <!-- Universal Metrics -->
+            <!-- Financial Metrics -->
+            {% if data.financial_metrics %}
             <div class="metrics-section">
                 <h2><i class="fas fa-chart-bar"></i> Financial Overview</h2>
                 <div class="metrics-grid">
-                    {% for metric_name, metric_data in data.verified_metrics.items() %}
-                    <div class="metric-card verified-metric">
-                        <div class="verification-badge verified">
-                            <i class="fas fa-check-circle"></i> Verified
-                        </div>
+                    {% for metric_name, metric_data in data.financial_metrics.items() %}
+                    <div class="metric-card verified-metric" 
+                         {% if metric_data.source_text %}
+                         title="Source: {{ metric_data.source_text }}"
+                         {% endif %}
+                         style="cursor: help;">
                         <div class="metric-icon">
                             <i class="fas fa-euro-sign"></i>
                         </div>
                         <div class="metric-content">
                             <h3>{{ metric_name.replace('_', ' ').title() }}</h3>
                             <div class="metric-value">
-                                {{ "{:,.0f}".format(metric_data.value) }} 
-                                <span class="metric-unit">{{ metric_data.unit.replace('_', ' ') }}</span>
+                                {{ "{:,.0f}".format(metric_data.value) if metric_data.value > 1 else "{:.2f}".format(metric_data.value) }} 
+                                <span class="metric-unit">{{ metric_data.unit.replace('_', ' ') if metric_data.unit else '' }}</span>
                             </div>
-                            <div class="metric-period">{{ metric_data.period }}</div>
+                            <div class="metric-period">{{ metric_data.period if metric_data.period else 'N/A' }}</div>
+                            <div class="metric-metadata" style="font-size: 0.8rem; color: #666; margin-top: 0.5rem; display: flex; justify-content: space-between;">
+                                <span>
+                                    {% if metric_data.page_number %}
+                                    <i class="fas fa-file-alt"></i> Page {{ metric_data.page_number }}
+                                    {% endif %}
+                                </span>
+                                <span>
+                                    {% if metric_data.confidence %}
+                                    <i class="fas fa-check-circle"></i> {{ "{:.0%}".format(metric_data.confidence) }}
+                                    {% endif %}
+                                </span>
+                            </div>
+                            {% if metric_data.extraction_method %}
+                            <div style="font-size: 0.7rem; color: #888; margin-top: 0.25rem;">
+                                Method: {{ metric_data.extraction_method.replace('_', ' ').title() }}
+                            </div>
+                            {% endif %}
+                            {% if metric_data.source_text and metric_data.source_text != metric_name + ': ' + metric_data.value|string %}
+                            <div class="source-preview" style="font-size: 0.7rem; color: #999; margin-top: 0.5rem; padding: 0.25rem; background: #f8f9fa; border-radius: 4px; border-left: 3px solid #007bff;">
+                                <i class="fas fa-quote-left"></i> "{{ metric_data.source_text[:50] }}{% if metric_data.source_text|length > 50 %}...{% endif %}"
+                            </div>
+                            {% endif %}
                         </div>
                     </div>
                     {% endfor %}
                 </div>
             </div>
-            
-            {% if data.disputed_metrics %}
-            <div class="metrics-section disputed-section">
-                <h2><i class="fas fa-exclamation-triangle"></i> Metrics Requiring Review</h2>
-                {% for metric_name, metric_data in data.disputed_metrics.items() %}
-                <div class="metric-card disputed-metric">
-                    <div class="verification-badge disputed">
-                        <i class="fas fa-exclamation-triangle"></i> Disputed
-                    </div>
-                    <!-- ... metric display with conflict notes ... -->
-                    <div class="conflict-note">{{ metric_data.notes }}</div>
-                </div>
-                {% endfor %}
-            </div>
             {% endif %}
 
-            <!-- Industry-Specific Metrics -->
+            <!-- Operational Metrics -->
+            {% if data.operational_metrics %}
             <div class="metrics-section">
-                <h2><i class="fas fa-cogs"></i> {{ data.company_profile.detected_industry.title() }} Metrics</h2>
+                <h2><i class="fas fa-cogs"></i> Operational Metrics</h2>
                 <div class="metrics-grid">
-                    {% for metric_name, metric_data in data.industry_specific_metrics.items() %}
+                    {% for metric_name, metric_data in data.operational_metrics.items() %}
                     <div class="metric-card industry-metric">
                         <div class="metric-icon">
                             <i class="fas fa-chart-line"></i>
@@ -97,17 +144,36 @@
                         <div class="metric-content">
                             <h3>{{ metric_name.replace('_', ' ').title() }}</h3>
                             <div class="metric-value">
-                                {{ "{:,.0f}".format(metric_data.value) if metric_data.value > 1 else "{:.1f}".format(metric_data.value) }}
-                                <span class="metric-unit">{{ metric_data.unit.replace('_', ' ') }}</span>
+                                {{ "{:,.0f}".format(metric_data.value) if metric_data.value > 1 else "{:.2f}".format(metric_data.value) }}
+                                <span class="metric-unit">{{ metric_data.unit.replace('_', ' ') if metric_data.unit else '' }}</span>
                             </div>
-                            <div class="metric-period">{{ metric_data.period }}</div>
+                            <div class="metric-period">{{ metric_data.period if metric_data.period else 'N/A' }}</div>
+                            <div class="metric-metadata" style="font-size: 0.8rem; color: #666; margin-top: 0.5rem; display: flex; justify-content: space-between;">
+                                <span>
+                                    {% if metric_data.page_number %}
+                                    <i class="fas fa-file-alt"></i> Page {{ metric_data.page_number }}
+                                    {% endif %}
+                                </span>
+                                <span>
+                                    {% if metric_data.confidence %}
+                                    <i class="fas fa-check-circle"></i> {{ "{:.0%}".format(metric_data.confidence) }}
+                                    {% endif %}
+                                </span>
+                            </div>
+                            {% if metric_data.extraction_method %}
+                            <div style="font-size: 0.7rem; color: #888; margin-top: 0.25rem;">
+                                Method: {{ metric_data.extraction_method.replace('_', ' ').title() }}
+                            </div>
+                            {% endif %}
                         </div>
                     </div>
                     {% endfor %}
                 </div>
             </div>
+            {% endif %}
 
             <!-- Business Intelligence -->
+            {% if data.business_intelligence %}
             <div class="insights-section">
                 <h2><i class="fas fa-lightbulb"></i> Business Intelligence</h2>
                 <div class="insights-grid">
@@ -120,33 +186,38 @@
                             </div>
                         </div>
                         <p class="insight-text">{{ insight.insight }}</p>
-                        <div class="supporting-metrics">
-                            <small>Based on: {{ insight.supporting_metrics | join(', ') }}</small>
-                        </div>
                     </div>
                     {% endfor %}
                 </div>
             </div>
+            {% endif %}
 
-            <!-- Coverage Analysis -->
+            <!-- Document Info -->
+            {% if data.company_profile %}
             <div class="coverage-section">
-                <h2><i class="fas fa-analytics"></i> Analysis Coverage</h2>
+                <h2><i class="fas fa-info-circle"></i> Document Information</h2>
                 <div class="coverage-stats">
                     <div class="coverage-item">
-                        <div class="coverage-number">{{ data.coverage_analysis.total_metrics }}</div>
-                        <div class="coverage-label">Total Metrics Found</div>
+                        <div class="coverage-number">{{ data.company_profile.total_pages or '0' }}</div>
+                        <div class="coverage-label">Total Pages</div>
                     </div>
                     <div class="coverage-item">
-                        <div class="coverage-number">{{ data.coverage_analysis.universal_coverage }}</div>
-                        <div class="coverage-label">Universal Metrics</div>
+                        <div class="coverage-number">{{ data.company_profile.pages_processed or '0' }}</div>
+                        <div class="coverage-label">Pages Analyzed</div>
                     </div>
                     <div class="coverage-item">
-                        <div class="coverage-number">{{ data.coverage_analysis.industry_coverage }}</div>
-                        <div class="coverage-label">Industry Metrics</div>
+                        <div class="coverage-number">{{ "{:.1f}s".format(data.company_profile.processing_time) if data.company_profile.processing_time else '0s' }}</div>
+                        <div class="coverage-label">Processing Time</div>
+                    </div>
+                    <div class="coverage-item">
+                        <div class="coverage-number">{{ data.company_profile.filename or 'Unknown' }}</div>
+                        <div class="coverage-label">Source File</div>
                     </div>
                 </div>
             </div>
+            {% endif %}
         </div>
+        {% endif %}
     </div>
 </body>
 </html>

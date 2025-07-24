@@ -1,6 +1,7 @@
-# core/document_processor.py (Simplified version that actually works)
+# core/document_processor_fixed.py
 """
-Simplified document processor that mirrors the working single-file version
+SIMPLIFIED & RELIABLE Document Processor
+This version focuses on actually extracting metrics rather than complex verification
 """
 
 import json
@@ -11,220 +12,22 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from datetime import datetime
 
-from .knowledge_base import GICSKnowledgeBase
-from .database import DatabaseManager
-from utils.api_client import LLMClient
-from .dual_agent_verification import DualAgentVerificationSystem, VerificationStatus, VerificationResult
-
-"""
-Debug script to identify why metrics extraction is failing
-Add this temporarily to your document_processor.py or run separately
-"""
-
-import json
-import pdfplumber
-
-class MetricExtractionDebugger:
-    def __init__(self, llm_client):
-        self.llm_client = llm_client
-        
-    def debug_extraction(self, pdf_path: str, page_num: int = 1):
-        """Debug metric extraction step by step"""
-        
-        print("\n" + "="*60)
-        print("METRIC EXTRACTION DEBUGGING")
-        print("="*60)
-        
-        # Step 1: Check PDF reading
-        print("\n1. CHECKING PDF READING:")
-        try:
-            with pdfplumber.open(pdf_path) as pdf:
-                if page_num > len(pdf.pages):
-                    print(f"   ❌ Page {page_num} doesn't exist. PDF has {len(pdf.pages)} pages")
-                    return
-                    
-                page = pdf.pages[page_num - 1]
-                text = page.extract_text() or ""
-                
-                print(f"   ✅ Successfully read page {page_num}")
-                print(f"   📄 Text length: {len(text)} characters")
-                print(f"   📄 First 500 chars: {text[:500]}...")
-                
-                if len(text.strip()) < 100:
-                    print("   ❌ Page has insufficient text!")
-                    return
-                    
-        except Exception as e:
-            print(f"   ❌ PDF reading failed: {e}")
-            return
-            
-        # Step 2: Test basic prompt
-        print("\n2. TESTING BASIC EXTRACTION PROMPT:")
-        basic_prompt = """
-                        Extract ALL numerical values from this text. Look for:
-                        - Any number followed by "million", "billion", "€", "$", "%"
-                        - Any metric name followed by a number
-                        - Revenue, costs, profits, assets, employees, etc.
-
-                        Return as JSON array:
-                        [{"metric_name": "name", "value": number, "unit": "unit", "period": "period"}]
-
-                        Return ONLY the JSON array, nothing else.
-                        """
-        
-        print("   📝 Sending basic prompt to LLM...")
-        try:
-            # Direct API call for debugging
-            import requests
-            
-            data = {
-                "model": "mistral-small3.2:latest",
-                "messages": [
-                    {"role": "system", "content": "You are a metric extraction expert. Extract all numerical data."},
-                    {"role": "user", "content": f"{basic_prompt}\n\nText:\n{text[:3000]}"}
-                ],
-                "temperature": 0.0,
-                "max_tokens": 2000
-            }
-            
-            response = requests.post(
-                self.llm_client.base_url,
-                headers=self.llm_client.headers,
-                json=data,
-                timeout=60
-            )
-            
-            print(f"   📡 API Response Status: {response.status_code}")
-            
-            if response.status_code == 200:
-                resp_json = response.json()
-                content = resp_json['choices'][0]['message']['content']
-                print(f"   📄 Raw LLM Response (first 500 chars):\n{content[:500]}")
-                
-                # Try to parse JSON
-                json_start = content.find('[')
-                json_end = content.rfind(']')
-                
-                if json_start != -1 and json_end != -1:
-                    json_str = content[json_start:json_end + 1]
-                    print(f"\n   🔍 Extracted JSON string: {json_str[:200]}...")
-                    
-                    try:
-                        metrics = json.loads(json_str)
-                        print(f"   ✅ Successfully parsed {len(metrics)} metrics")
-                        
-                        if len(metrics) > 0:
-                            print("\n   📊 Sample metrics found:")
-                            for i, m in enumerate(metrics[:3]):
-                                print(f"      {i+1}. {m.get('metric_name', 'Unknown')}: {m.get('value', 'N/A')} {m.get('unit', '')}")
-                        else:
-                            print("   ⚠️  JSON parsed but no metrics found!")
-                            
-                    except json.JSONDecodeError as e:
-                        print(f"   ❌ JSON parsing failed: {e}")
-                        print(f"   📄 JSON string that failed: {json_str}")
-                else:
-                    print("   ❌ No JSON array found in response!")
-                    print("   💡 The LLM might be returning explanatory text instead of JSON")
-                    
-            else:
-                print(f"   ❌ API call failed: {response.text}")
-                
-        except Exception as e:
-            print(f"   ❌ Extraction test failed: {e}")
-            import traceback
-            traceback.print_exc()
-            
-        # Step 3: Check for common issues
-        print("\n3. CHECKING COMMON ISSUES:")
-        
-        # Check if text has numbers
-        import re
-        numbers = re.findall(r'\b\d+(?:,\d{3})*(?:\.\d+)?\b', text)
-        print(f"   📊 Numbers found in text: {len(numbers)}")
-        if numbers:
-            print(f"   📊 Sample numbers: {numbers[:5]}")
-            
-        # Check for currency/units
-        currencies = re.findall(r'[€$£¥]|EUR|USD|million|billion|thousand', text, re.IGNORECASE)
-        print(f"   💰 Currency/unit indicators found: {len(currencies)}")
-        
-        # Check for metric keywords
-        metric_keywords = ['revenue', 'income', 'profit', 'cost', 'asset', 'employee', 'sales']
-        found_keywords = [kw for kw in metric_keywords if kw in text.lower()]
-        print(f"   🔍 Metric keywords found: {found_keywords}")
-        
-        # Step 4: Test with a simpler extraction
-        print("\n4. TESTING SIMPLE PATTERN MATCHING:")
-        simple_patterns = [
-            r'(?:revenue|sales|income)[:\s]+(?:€|EUR)?\s*(\d+(?:\.\d+)?)\s*(million|billion)?',
-            r'(\d+(?:\.\d+)?)\s*(million|billion)?\s*(?:€|EUR|euros?)',
-            r'(?:total|net)?\s*(?:assets?|liabilities|equity)[:\s]+(?:€|EUR)?\s*(\d+(?:\.\d+)?)\s*(million|billion)?'
-        ]
-        
-        pattern_matches = []
-        for pattern in simple_patterns:
-            matches = re.findall(pattern, text, re.IGNORECASE)
-            if matches:
-                pattern_matches.extend(matches)
-                
-        print(f"   🎯 Pattern matches found: {len(pattern_matches)}")
-        if pattern_matches:
-            print(f"   🎯 Sample matches: {pattern_matches[:3]}")
-            
-        return text  # Return text for further analysis
-
-# To use this debugger:
-def debug_metric_issue(processor, pdf_path):
-    """Run this in your main processing flow"""
-    debugger = MetricExtractionDebugger(processor.llm_client)
-    
-    # Test on first few pages
-    for page in [1, 2, 3]:
-        print(f"\n\n{'='*20} TESTING PAGE {page} {'='*20}")
-        debugger.debug_extraction(pdf_path, page)
-        
-    # Also test the actual extraction method
-    print("\n\n5. TESTING ACTUAL EXTRACTION METHOD:")
-    print("   Running processor._extract_page_metrics...")
-    
-    try:
-        with pdfplumber.open(pdf_path) as pdf:
-            if len(pdf.pages) > 0:
-                text = pdf.pages[0].extract_text() or ""
-                metrics = processor._extract_page_metrics(text, 1, "airlines", 1)
-                print(f"   📊 Metrics returned: {len(metrics)}")
-                if metrics:
-                    print("   📊 First metric:", metrics[0])
-    except Exception as e:
-        print(f"   ❌ Method test failed: {e}")
-        import traceback
-        traceback.print_exc()
-
 class DocumentProcessor:
     """
-    Simplified document processor that matches the original working version
+    Simplified, working document processor
     """
     
-    def __init__(self, llm_client: LLMClient, db_manager: DatabaseManager):
+    def __init__(self, llm_client, db_manager):
         self.llm_client = llm_client
         self.db_manager = db_manager
-        self.knowledge_base = GICSKnowledgeBase()
         
-        # Processing configuration
-        self.MAX_PAGES_TO_PROCESS = 20
-        self.MAX_PROCESSING_TIME = 900  # 15 minutes
-        self.BATCH_SIZE = 4
-        
-        # Progress tracking
-        self.processing_progress = {}
-
-        # Add dual-agent system
-        self.verification_system = DualAgentVerificationSystem(llm_client)
+        # Simple configuration
+        self.MAX_PAGES_TO_PROCESS = 15
+        self.MAX_PROCESSING_TIME = 600  # 10 minutes
         
     def process_document(self, pdf_path: str) -> Dict:
         """
-        Main document processing pipeline
+        Main processing pipeline - SIMPLIFIED
         """
         document_id = None
         start_time = time.time()
@@ -232,184 +35,32 @@ class DocumentProcessor:
         try:
             print(f"\n🚀 Starting Document Processing...")
             
-            # Phase 1: Document structure analysis
-            print("📋 Phase 1: Document structure analysis...")
-            structure_analysis = self._analyze_document_structure(pdf_path)
-            if not structure_analysis.get('success'):
-                return structure_analysis
-            
-            # Phase 2: Industry detection
-            print("🏭 Phase 2: Industry detection...")
-            industry_detection = self.knowledge_base.detect_industry(
-                structure_analysis['sample_text'], 
-                structure_analysis['company_name']
-            )
-            
-            # Phase 3: Create company and document records
-            print("💾 Phase 3: Creating database records...")
-            document_id = self._create_document_record(
-                pdf_path, structure_analysis, industry_detection
-            )
-            
-            # Phase 4: Extract metrics
-            print("🔍 Phase 4: Extracting metrics...")
-            extraction_results = self._extract_metrics(
-                pdf_path, document_id, industry_detection
-            )
-            
-            # Phase 5: Generate insights
-            print("🧠 Phase 5: Generating business insights...")
-            insights = self._generate_insights(
-                document_id, extraction_results, industry_detection
-            )
-            
-            # Phase 6: Finalize processing
-            print("✅ Phase 6: Finalizing...")
-            final_results = self._finalize_processing(
-                document_id, extraction_results, insights, start_time
-            )
-            
-            print(f"✅ Processing completed successfully in {time.time() - start_time:.1f}s")
-            return final_results
-            
-        except Exception as e:
-            print(f"❌ Processing failed: {str(e)}")
-            
-            if document_id:
-                self._update_document_status(document_id, "failed", str(e))
-            
-            return {
-                'success': False,
-                'error': str(e),
-                'document_id': document_id,
-                'processing_time': time.time() - start_time
-            }
-    
-    def _analyze_document_structure(self, pdf_path: str) -> Dict:
-        """Analyze document structure"""
-        try:
+            # Step 1: Basic document analysis
             with pdfplumber.open(pdf_path) as pdf:
                 total_pages = len(pdf.pages)
+                print(f"  📄 Document has {total_pages} pages")
                 
-                if total_pages == 0:
-                    return {'success': False, 'error': 'PDF contains no pages'}
+                # Extract company name from first few pages
+                company_name = self._extract_company_name_simple(pdf)
+                print(f"  🏢 Company: {company_name}")
                 
-                # Extract sample text from first few pages
-                sample_text = ""
-                for i in range(min(5, total_pages)):
-                    try:
-                        page_text = pdf.pages[i].extract_text() or ""
-                        sample_text += page_text + " "
-                    except Exception as e:
-                        print(f"    ⚠️ Error extracting text from page {i+1}: {e}")
-                        continue
-                
-                if len(sample_text.strip()) < 100:
-                    return {'success': False, 'error': 'PDF contains insufficient text content'}
-                
-                # Extract company name
-                company_name = self._extract_company_name(sample_text)
-                
-                return {
-                    'success': True,
-                    'total_pages': total_pages,
-                    'sample_text': sample_text[:3000],
-                    'company_name': company_name,
-                    'file_path': pdf_path
-                }
-                
-        except Exception as e:
-            return {'success': False, 'error': f'Failed to analyze PDF structure: {str(e)}'}
-    
-    def _create_document_record(self, pdf_path: str, structure_analysis: Dict, 
-                               industry_detection: Dict) -> int:
-        """Create company and document records in database"""
-        cursor = self.db_manager.connection.cursor()
-        
-        try:
-            # Create or get company
-            company_name = structure_analysis['company_name']
-            detected_industry = industry_detection['industry']
-            industry_confidence = industry_detection['confidence']
+                # Simple industry detection
+                industry = self._detect_industry_simple(pdf)
+                print(f"  🏭 Industry: {industry}")
             
-            # Check if company exists
-            cursor.execute("SELECT id FROM companies WHERE name = ?", (company_name,))
-            company_row = cursor.fetchone()
+            # Step 2: Create database records
+            document_id = self._create_simple_document_record(
+                pdf_path, company_name, industry, total_pages
+            )
+            print(f"  💾 Created document record: {document_id}")
             
-            if company_row:
-                company_id = company_row[0]
-                # Update industry information
-                cursor.execute("""
-                    UPDATE companies 
-                    SET detected_industry = ?, industry_confidence = ?, updated_at = ?
-                    WHERE id = ?
-                """, (detected_industry, industry_confidence, datetime.now(), company_id))
-            else:
-                # Create new company
-                cursor.execute("""
-                    INSERT INTO companies (name, detected_industry, industry_confidence)
-                    VALUES (?, ?, ?)
-                """, (company_name, detected_industry, industry_confidence))
-                company_id = cursor.lastrowid
+            # Step 3: Extract metrics using HYBRID approach
+            print("🔍 Extracting metrics...")
+            all_metrics = []
             
-            # Create document record
-            filename = Path(pdf_path).name
-            cursor.execute("""
-                INSERT INTO documents 
-                (company_id, filename, file_path, total_pages, status, processing_strategy)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                company_id, 
-                filename, 
-                pdf_path, 
-                structure_analysis['total_pages'], 
-                'processing',
-                f"simplified_{detected_industry}"
-            ))
+            pages_to_process = self._select_key_pages(pdf_path, total_pages)
+            print(f"  📋 Processing {len(pages_to_process)} key pages")
             
-            document_id = cursor.lastrowid
-            
-            # Create industry analysis record
-            cursor.execute("""
-                INSERT INTO industry_analysis 
-                (document_id, detected_industry, industry_confidence, detection_scores, target_metrics)
-                VALUES (?, ?, ?, ?, ?)
-            """, (
-                document_id,
-                detected_industry,
-                industry_confidence,
-                json.dumps(industry_detection.get('scores', {})),
-                json.dumps(self.knowledge_base.get_all_target_metrics(detected_industry))
-            ))
-            
-            self.db_manager.connection.commit()
-            
-            print(f"  📝 Created document record ID: {document_id}")
-            return document_id
-            
-        except Exception as e:
-            self.db_manager.connection.rollback()
-            raise Exception(f"Failed to create document record: {str(e)}")
-    
-    # EMERGENCY FIX for document_processor.py
-    # Replace the _extract_metrics method with this simplified version
-
-    def _extract_metrics(self, pdf_path: str, document_id: int, industry_detection: Dict) -> Dict:
-        """Extract metrics WITHOUT dual-agent verification"""
-        
-        # Get the detected industry
-        detected_industry = industry_detection['industry']
-        
-        # Select pages to process
-        pages_to_process = self._select_pages_to_process(pdf_path, detected_industry)
-        
-        results = {
-            'metrics': [],
-            'processed_pages': [],
-            'success_rate': 0.0
-        }
-        
-        try:
             with pdfplumber.open(pdf_path) as pdf:
                 for page_num in pages_to_process:
                     if page_num > len(pdf.pages):
@@ -418,210 +69,378 @@ class DocumentProcessor:
                     page = pdf.pages[page_num - 1]
                     text = page.extract_text() or ""
                     
-                    if len(text.strip()) < 100:
+                    if len(text.strip()) < 50:
                         continue
                     
-                    # Use regular extraction (NOT dual-agent)
-                    page_metrics = self._extract_page_metrics(text, page_num, detected_industry, document_id)
+                    print(f"    📄 Processing page {page_num}...")
+                    
+                    # HYBRID EXTRACTION: Try LLM first, then regex fallback
+                    page_metrics = self._extract_page_metrics_hybrid(
+                        text, page_num, industry
+                    )
                     
                     if page_metrics:
-                        results['metrics'].extend(page_metrics)
-                        # Store metrics immediately
-                        self._store_page_metrics(document_id, page_metrics)
-                    
-                    results['processed_pages'].append(page_num)
-                    print(f"    ✅ Page {page_num}: {len(page_metrics)} metrics extracted")
+                        # Store immediately
+                        self._store_metrics_simple(document_id, page_metrics)
+                        all_metrics.extend(page_metrics)
+                        print(f"      ✅ Found {len(page_metrics)} metrics")
+                    else:
+                        print(f"      ⚠️ No metrics found")
             
-            # Calculate success rate
-            total_pages = len(results['processed_pages'])
-            if total_pages > 0:
-                results['success_rate'] = len(results['metrics']) / (total_pages * 5)  # Assume 5 metrics per page average
+            # Step 4: Generate simple insights
+            insights = self._generate_simple_insights(document_id, all_metrics)
+            self._store_insights_simple(document_id, insights)
             
-            # Add empty verification summary for compatibility
-            results['verification_summary'] = {
-                'verified_count': len(results['metrics']),
-                'disputed_count': 0,
-                'total_count': len(results['metrics']),
-                'verification_rate': 1.0
+            # Step 5: Complete processing
+            processing_time = time.time() - start_time
+            self._complete_document_processing(
+                document_id, len(all_metrics), len(pages_to_process), processing_time
+            )
+            
+            print(f"✅ Processing completed in {processing_time:.1f}s")
+            print(f"📊 Total metrics extracted: {len(all_metrics)}")
+            
+            return {
+                'success': True,
+                'document_id': document_id,
+                'metrics_extracted': len(all_metrics),
+                'pages_processed': len(pages_to_process),
+                'processing_time': processing_time
             }
             
-            # For template compatibility
-            results['verified_metrics'] = results['metrics']
-            results['disputed_metrics'] = []
-            results['uncertain_metrics'] = []
-            
-            return results
-            
         except Exception as e:
-            raise Exception(f"Metric extraction failed: {str(e)}")
-
-    def _select_pages_to_process(self, pdf_path: str, industry: str) -> List[int]:
-        """Select optimal pages for processing"""
-        try:
-            with pdfplumber.open(pdf_path) as pdf:
-                total_pages = len(pdf.pages)
-        except:
-            return list(range(1, min(self.MAX_PAGES_TO_PROCESS + 1, 21)))
+            print(f"❌ Processing failed: {str(e)}")
+            if document_id:
+                self._mark_document_failed(document_id, str(e))
+            
+            return {
+                'success': False,
+                'error': str(e),
+                'document_id': document_id
+            }
+    
+    def _extract_company_name_simple(self, pdf) -> str:
+        """Extract company name from first 3 pages"""
+        text = ""
+        for i in range(min(3, len(pdf.pages))):
+            text += pdf.pages[i].extract_text() or ""
         
+        # Simple patterns
+        patterns = [
+            r'([A-Z][A-Za-z\s&\.]{2,50}(?:GROUP|PLC|INC|CORP|LIMITED|LTD|HOLDINGS|SA|AG|NV))',
+            r'ANNUAL\s+REPORT.*?(?:2024|2023|2022).*?([A-Z][A-Za-z\s&\.]{5,40})',
+        ]
+        
+        for pattern in patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for match in matches:
+                name = match.strip()
+                if 5 <= len(name) <= 50 and name.count(' ') <= 4:
+                    return name
+        
+        return "Unknown Company"
+    
+    def _detect_industry_simple(self, pdf) -> str:
+        """Simple industry detection"""
+        text = ""
+        for i in range(min(10, len(pdf.pages))):
+            text += (pdf.pages[i].extract_text() or "").lower()
+        
+        # Industry keywords
+        if any(word in text for word in ['aircraft', 'passengers', 'flights', 'aviation', 'airline']):
+            return 'airlines'
+        elif any(word in text for word in ['deposits', 'loans', 'branches', 'bank', 'credit']):
+            return 'banking'
+        elif any(word in text for word in ['software', 'users', 'platform', 'digital', 'saas']):
+            return 'technology'
+        elif any(word in text for word in ['stores', 'retail', 'merchandise', 'customers']):
+            return 'retail'
+        else:
+            return 'other'
+    
+    def _select_key_pages(self, pdf_path: str, total_pages: int) -> List[int]:
+        """Select the most important pages for processing"""
         if total_pages <= self.MAX_PAGES_TO_PROCESS:
             return list(range(1, total_pages + 1))
         
-        # Strategic page selection
-        selected_pages = []
+        # Strategic selection
+        key_pages = []
         
-        # Early pages (usually contain key metrics)
-        selected_pages.extend(range(1, min(8, total_pages + 1)))
+        # Always include first 5 pages (usually contain key metrics)
+        key_pages.extend(range(1, min(6, total_pages + 1)))
         
-        # Middle section (often contains detailed financials)
-        middle_start = max(8, total_pages // 3)
-        middle_end = min(middle_start + 6, total_pages + 1)
-        selected_pages.extend(range(middle_start, middle_end))
+        # Add middle section (often contains detailed financials)
+        if total_pages > 10:
+            middle_start = total_pages // 3
+            middle_end = min(middle_start + 5, total_pages + 1)
+            key_pages.extend(range(middle_start, middle_end))
         
-        # Later pages (may contain supplementary data)
+        # Add a few later pages
         if total_pages > 15:
-            late_start = max(middle_end, 2 * total_pages // 3)
-            late_end = min(late_start + 4, total_pages + 1)
-            selected_pages.extend(range(late_start, late_end))
+            late_start = max(total_pages - 3, middle_end if 'middle_end' in locals() else 10)
+            key_pages.extend(range(late_start, total_pages + 1))
         
         # Remove duplicates and sort
-        selected_pages = sorted(list(set(selected_pages)))
-        
-        # Limit to max pages
-        return selected_pages[:self.MAX_PAGES_TO_PROCESS]
+        return sorted(list(set(key_pages)))[:self.MAX_PAGES_TO_PROCESS]
     
-    def _extract_page_metrics(self, text: str, page_num: int, industry: str, document_id: int) -> List[Dict]:
-        """Extract metrics from a single page"""
-        # Create industry-specific prompt
-        prompt = self._create_extraction_prompt(industry)
+    def _extract_page_metrics_hybrid(self, text: str, page_num: int, industry: str) -> List[Dict]:
+        """
+        HYBRID extraction: LLM first, then regex fallback
+        """
+        # Try LLM extraction first
+        llm_metrics = self._extract_with_llm(text, page_num, industry)
+        if llm_metrics:
+            print(f"      🤖 LLM extracted {len(llm_metrics)} metrics")
+            return llm_metrics
         
-        # Extract using LLM client
-        metrics = self.llm_client.extract_metrics(text, page_num, prompt, 90, industry)
+        # Fallback to regex extraction
+        print(f"      🔧 Falling back to regex extraction")
+        regex_metrics = self._extract_with_regex(text, page_num)
+        if regex_metrics:
+            print(f"      📊 Regex extracted {len(regex_metrics)} metrics")
+            return regex_metrics
         
-        # Classify metrics
-        for metric in metrics:
-            metric['metric_type'] = self._classify_metric_type(metric['metric'], industry)
-            metric['document_id'] = document_id
-        
-        return metrics
+        return []
     
-    def _create_extraction_prompt(self, industry: str) -> str:
-        """Create more explicit extraction prompt"""
-        industry_info = self.knowledge_base.get_industry_info(industry)
-        
-        base_prompt = """
-                        IMPORTANT: You MUST return ONLY a JSON array. No explanations, no text, ONLY JSON.
-
-                        Extract ALL numerical metrics from this text. Include:
-                        1. Any number with currency (€, $, EUR, USD)
-                        2. Any number with units (million, billion, %, thousand)
-                        3. Any metric name followed by a number
-                        4. Financial figures, operational statistics, employee counts
-
-                        REQUIRED FORMAT - Return ONLY this JSON structure:
-                        [
-                        {"metric_name": "Total Revenue", "value": 1234.5, "unit": "million EUR", "period": "2024"},
-                        {"metric_name": "Net Income", "value": 567.8, "unit": "million EUR", "period": "2024"}
-                        ]
-
-                        RULES:
-                        - metric_name: descriptive name of what the number represents
-                        - value: the numerical value ONLY (no currency symbols)
-                        - unit: include currency and scale (e.g., "million EUR", "billion USD", "percentage")
-                        - period: year or time period (e.g., "2024", "Q1 2024", "FY2023")
-
-                        Start your response with [ and end with ]
-                        """
-        
-        if industry != "other" and industry_info.get('key_metrics'):
-            industry_metrics = ", ".join(list(industry_info['key_metrics'].keys())[:5])
-            base_prompt += f"\n\nPay special attention to {industry} metrics like: {industry_metrics}"
-        
-        return base_prompt
-
-    # Fix 3: Add fallback extraction method
-    # Add this to document_processor.py:
-
-    def _fallback_regex_extraction(self, text: str, page_num: int) -> List[Dict]:
-            """Fallback regex-based extraction when LLM fails"""
-            print("    🔧 Using fallback regex extraction...")
+    def _extract_with_llm(self, text: str, page_num: int, industry: str) -> List[Dict]:
+        """LLM-based extraction with robust parsing"""
+        try:
+            prompt = """
+            Extract ALL numerical financial metrics from this text.
             
-            metrics = []
+            Look for:
+            - Revenue, income, costs, profits (with € or $ amounts)
+            - Employee counts, customer numbers
+            - Any number with "million", "billion", "%"
+            - Growth rates, ratios, percentages
             
-            # Common patterns for financial data
-            patterns = [
-                # Format: "Revenue: €1,234.5 million"
-                r'([\w\s]+?):\s*[€$£]?\s*([\d,]+\.?\d*)\s*(million|billion|thousand)?\s*(EUR|USD|GBP)?',
-                # Format: "€1,234.5 million in revenue"
-                r'[€$£]\s*([\d,]+\.?\d*)\s*(million|billion|thousand)?\s*(?:in|of|for)?\s*([\w\s]+)',
-                # Format: "Total assets of 1,234.5 million"
-                r'([\w\s]+?)\s+of\s+[€$£]?\s*([\d,]+\.?\d*)\s*(million|billion|thousand)?',
-                # Percentage format: "growth of 12.5%"
-                r'([\w\s]+?)\s+of\s+([\d,]+\.?\d*)\s*%',
+            Return ONLY a JSON array like this:
+            [
+                {"name": "Total Revenue", "value": 13949, "unit": "million EUR", "period": "2025"},
+                {"name": "Net Income", "value": 1612, "unit": "million EUR", "period": "2025"}
             ]
             
-            for pattern in patterns:
-                matches = re.findall(pattern, text, re.IGNORECASE)
-                for match in matches:
-                    try:
-                        if len(match) >= 2:
-                            metric_name = match[0].strip() if isinstance(match[0], str) else str(match[2]).strip()
-                            value_str = match[1].replace(',', '')
-                            value = float(value_str)
-                            
-                            unit = "number"
-                            if len(match) > 2 and match[2]:
-                                unit = match[2]
-                            if len(match) > 3 and match[3]:
-                                unit += f" {match[3]}"
-                            
-                            metrics.append({
-                                "metric": metric_name,
-                                "value": value,
-                                "unit": unit,
-                                "period": "2024",  # Default, would need better detection
-                                "confidence": 0.7,  # Lower confidence for regex
-                                "page_number": page_num,
-                                "extraction_method": "regex_fallback",
-                                "source_text": match[0]
-                            })
-                    except:
-                        continue
+            CRITICAL: Return ONLY the JSON array, no other text.
+            """
             
-            print(f"    📊 Fallback extracted {len(metrics)} metrics")
+            # Call LLM
+            response = self.llm_client.extract_metrics(text, page_num, prompt, 60, industry)
+            
+            if not response:
+                return []
+            
+            # Convert to our format
+            metrics = []
+            for item in response:
+                if isinstance(item, dict) and 'name' in item or 'metric' in item or 'metric_name' in item:
+                    metric_name = (item.get('name') or 
+                                 item.get('metric') or 
+                                 item.get('metric_name', 'Unknown'))
+                    
+                    value = item.get('value', 0)
+                    if isinstance(value, str):
+                        # Clean string values
+                        value = re.sub(r'[€$£,]', '', value)
+                        try:
+                            value = float(value)
+                        except:
+                            continue
+                    
+                    if isinstance(value, (int, float)) and value != 0:
+                        metrics.append({
+                            'metric': metric_name,
+                            'value': float(value),
+                            'unit': item.get('unit', 'unknown'),
+                            'period': item.get('period', '2024'),
+                            'confidence': 0.85,
+                            'page_number': page_num,
+                            'extraction_method': 'llm',
+                            'source_text': item.get('source_text', '')
+                        })
+            
             return metrics
+            
+        except Exception as e:
+            print(f"        ❌ LLM extraction failed: {e}")
+            return []
     
-    def _classify_metric_type(self, metric_name: str, industry: str) -> str:
-        """Classify metric as universal, industry-specific, or other"""
-        metric_lower = metric_name.lower()
+    def _extract_with_regex(self, text: str, page_num: int) -> List[Dict]:
+        """FIXED regex extraction for your specific data format"""
+        metrics = []
         
-        # Check universal metrics
-        for universal_metric in self.knowledge_base.universal_metrics:
-            if universal_metric.replace('_', ' ') in metric_lower:
-                return 'universal'
+        print(f"        🔍 Analyzing text (length: {len(text)} chars)")
         
-        # Check industry-specific metrics
-        industry_info = self.knowledge_base.get_industry_info(industry)
-        if industry_info.get('key_metrics'):
-            for industry_metric in industry_info['key_metrics']:
-                if industry_metric.replace('_', ' ') in metric_lower:
-                    return 'industry_specific'
+        # Pattern 1: Financial line items with multiple years
+        # Matches: "Total Revenue         13,949     13,444     10,775"
+        pattern1 = r'([A-Za-z\s&-]+?)\s+([\d,]+)\s+([\d,]+)\s+([\d,]+)'
+        matches1 = re.findall(pattern1, text)
         
-        return 'other'
+        print(f"        📊 Pattern 1 found {len(matches1)} matches")
+        
+        for match in matches1:
+            try:
+                metric_name = match[0].strip()
+                # Take the first (most recent) value
+                value_str = match[1].replace(',', '')
+                value = float(value_str)
+                
+                # Skip if not a meaningful metric name
+                if len(metric_name) < 3 or metric_name.isdigit():
+                    continue
+                    
+                # Skip header rows
+                if any(word in metric_name.lower() for word in ['mar', 'income statement', 'balance sheet', "€'m"]):
+                    continue
+                
+                metrics.append({
+                    'metric': metric_name,
+                    'value': value,
+                    'unit': 'million EUR',
+                    'period': '2025',
+                    'confidence': 0.85,
+                    'page_number': page_num,
+                    'extraction_method': 'regex_fixed',
+                    'source_text': f"{metric_name}: {match[1]}"
+                })
+                
+                print(f"          ✅ Found: {metric_name} = {value}")
+                
+            except Exception as e:
+                print(f"          ❌ Error processing match: {e}")
+                continue
+        
+        # Pattern 2: Look for specific metrics by name (targeted approach)
+        target_metrics = [
+            'Total Revenue', 'Scheduled Revenue', 'Ancillary Revenue',
+            'Profit After Tax', 'Profit Before Tax', 'Net Income',
+            'Total Assets', 'Current Assets', 'Non-Current Assets',
+            'Shareholder Equity', 'Total Liabilities', 'Net Cash',
+            'Gross Cash', 'Current Liabilities', 'Non-Current Liabilities'
+        ]
+        
+        for target in target_metrics:
+            # Look for the metric name followed by numbers
+            pattern = rf'{re.escape(target)}\s*[:\s]*(\d{{1,2}},?\d{{3,4}})'
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            
+            if matches:
+                try:
+                    value_str = matches[0].replace(',', '')
+                    value = float(value_str)
+                    
+                    # Check if we already have this metric
+                    if not any(target.lower() in m['metric'].lower() for m in metrics):
+                        metrics.append({
+                            'metric': target,
+                            'value': value,
+                            'unit': 'million EUR',
+                            'period': '2025',
+                            'confidence': 0.90,
+                            'page_number': page_num,
+                            'extraction_method': 'regex_targeted',
+                            'source_text': f"{target}: {matches[0]}"
+                        })
+                        
+                        print(f"          🎯 Targeted find: {target} = {value}")
+                        
+                except Exception as e:
+                    continue
+        
+        # Pattern 3: Simple number extraction for remaining cases
+        lines = text.split('\n')
+        for line in lines:
+            line = line.strip()
+            if not line or len(line) < 10:
+                continue
+                
+            # Match: text followed by a number
+            match = re.match(r'([A-Za-z\s&-]+?)\s+([\d,]{3,6})(?:\s|$)', line)
+            if match:
+                try:
+                    metric_name = match.group(1).strip()
+                    value_str = match.group(2).replace(',', '')
+                    value = float(value_str)
+                    
+                    # Skip if already found, too short, or invalid
+                    if (len(metric_name) < 5 or 
+                        any(m['metric'].lower() == metric_name.lower() for m in metrics) or
+                        any(skip in metric_name.lower() for skip in ['mar', "€'m", 'income', 'balance'])):
+                        continue
+                    
+                    # Only include if value is reasonable (not year like 2025)
+                    if 100 <= value <= 50000:  # Reasonable range for financial metrics
+                        metrics.append({
+                            'metric': metric_name,
+                            'value': value,
+                            'unit': 'million EUR',
+                            'period': '2025',
+                            'confidence': 0.75,
+                            'page_number': page_num,
+                            'extraction_method': 'regex_line',
+                            'source_text': line
+                        })
+                        
+                        print(f"          📋 Line match: {metric_name} = {value}")
+                        
+                except Exception as e:
+                    continue
+        
+        print(f"        📊 Total metrics extracted: {len(metrics)}")
+        return metrics
     
-    def _store_page_metrics(self, document_id: int, metrics: List[Dict]):
-        """Store extracted metrics in database"""
+    def _create_simple_document_record(self, pdf_path: str, company_name: str, 
+                                     industry: str, total_pages: int) -> int:
+        """Create database records"""
+        cursor = self.db_manager.connection.cursor()
+        
+        try:
+            # Create or get company
+            cursor.execute("SELECT id FROM companies WHERE name = ?", (company_name,))
+            company_row = cursor.fetchone()
+            
+            if company_row:
+                company_id = company_row[0]
+            else:
+                cursor.execute("""
+                    INSERT INTO companies (name, detected_industry, industry_confidence)
+                    VALUES (?, ?, ?)
+                """, (company_name, industry, 0.8))
+                company_id = cursor.lastrowid
+            
+            # Create document record
+            filename = Path(pdf_path).name
+            cursor.execute("""
+                INSERT INTO documents 
+                (company_id, filename, file_path, total_pages, status)
+                VALUES (?, ?, ?, ?, ?)
+            """, (company_id, filename, pdf_path, total_pages, 'processing'))
+            
+            document_id = cursor.lastrowid
+            self.db_manager.connection.commit()
+            
+            return document_id
+            
+        except Exception as e:
+            self.db_manager.connection.rollback()
+            raise Exception(f"Database error: {str(e)}")
+    
+    def _store_metrics_simple(self, document_id: int, metrics: List[Dict]):
+        """Store metrics in database"""
         if not metrics:
             return
         
         cursor = self.db_manager.connection.cursor()
         
-        metrics_data = []
         for metric in metrics:
-            metrics_data.append((
+            cursor.execute("""
+                INSERT INTO financial_metrics 
+                (document_id, page_number, metric_name, value, unit, 
+                 period, confidence, extraction_method, source_text)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
                 document_id,
                 metric['page_number'],
                 metric['metric'],
-                metric['metric_type'],
                 metric['value'],
                 metric['unit'],
                 metric['period'],
@@ -630,244 +449,92 @@ class DocumentProcessor:
                 metric.get('source_text', '')
             ))
         
-        cursor.executemany("""
-            INSERT INTO financial_metrics 
-            (document_id, page_number, metric_name, metric_type, value, unit, 
-             period, confidence, extraction_method, source_text)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, metrics_data)
-        
         self.db_manager.connection.commit()
     
-    def _generate_insights(self, document_id: int, extraction_results: Dict, 
-                          industry_detection: Dict) -> List[Dict]:
-        """Generate business insights from extracted metrics"""
-        metrics = extraction_results['metrics']
-        industry = industry_detection['industry']
-        
+    def _generate_simple_insights(self, document_id: int, metrics: List[Dict]) -> List[Dict]:
+        """Generate basic business insights"""
         insights = []
         
-        # Generate insights based on metrics
-        if metrics:
-            # Financial health insight
-            revenue_metrics = [m for m in metrics if 'revenue' in m['metric'].lower()]
-            if revenue_metrics:
-                revenue = revenue_metrics[0]['value']
-                insights.append({
-                    'concept': 'Financial Performance',
-                    'insight': f"Revenue of {revenue:,.0f} {revenue_metrics[0]['unit']} indicates {'strong' if revenue > 1000 else 'moderate'} financial performance",
-                    'supporting_metrics': [revenue_metrics[0]['metric']],
-                    'confidence': 0.85
-                })
-            
-            # Industry-specific insights
-            if industry == 'airlines':
-                load_factors = [m for m in metrics if 'load_factor' in m['metric'].lower()]
-                if load_factors:
-                    lf = load_factors[0]['value']
-                    performance = 'excellent' if lf > 85 else 'good' if lf > 80 else 'needs improvement'
-                    insights.append({
-                        'concept': 'Operational Efficiency',
-                        'insight': f"Load factor of {lf:.1f}% indicates {performance} operational efficiency",
-                        'supporting_metrics': [load_factors[0]['metric']],
-                        'confidence': 0.90
-                    })
+        if not metrics:
+            return insights
         
-        # Store insights in database
-        if insights:
-            self._store_insights(document_id, insights)
+        # Revenue insight
+        revenue_metrics = [m for m in metrics if 'revenue' in m['metric'].lower()]
+        if revenue_metrics:
+            revenue = revenue_metrics[0]['value']
+            insight = f"Revenue of {revenue:,.0f} {revenue_metrics[0]['unit']} indicates {'strong' if revenue > 1000 else 'moderate'} business scale"
+            insights.append({
+                'concept': 'Financial Performance',
+                'insight': insight,
+                'confidence': 0.80
+            })
+        
+        # Profitability insight
+        profit_metrics = [m for m in metrics if any(word in m['metric'].lower() for word in ['profit', 'income', 'earnings'])]
+        if profit_metrics:
+            profit = profit_metrics[0]['value']
+            insight = f"Profit of {profit:,.0f} {profit_metrics[0]['unit']} shows {'healthy' if profit > 0 else 'concerning'} profitability"
+            insights.append({
+                'concept': 'Profitability',
+                'insight': insight,
+                'confidence': 0.75
+            })
         
         return insights
     
-    def _store_insights(self, document_id: int, insights: List[Dict]):
-        """Store business insights in database"""
+    def _store_insights_simple(self, document_id: int, insights: List[Dict]):
+        """Store insights in database"""
+        if not insights:
+            return
+        
         cursor = self.db_manager.connection.cursor()
         
         for insight in insights:
             cursor.execute("""
                 INSERT INTO business_intelligence 
-                (document_id, concept, insight_text, supporting_metrics, confidence)
-                VALUES (?, ?, ?, ?, ?)
+                (document_id, concept, insight_text, confidence)
+                VALUES (?, ?, ?, ?)
             """, (
                 document_id,
                 insight['concept'],
                 insight['insight'],
-                json.dumps(insight['supporting_metrics']),
                 insight['confidence']
             ))
         
         self.db_manager.connection.commit()
     
-    def _finalize_processing(self, document_id: int, extraction_results: Dict, 
-                           insights: List[Dict], start_time: float) -> Dict:
-        """Finalize processing and update database"""
-        processing_time = time.time() - start_time
-        
-        # Update document status
+    def _complete_document_processing(self, document_id: int, metrics_count: int, 
+                                    pages_processed: int, processing_time: float):
+        """Mark document as completed"""
         cursor = self.db_manager.connection.cursor()
         cursor.execute("""
             UPDATE documents 
             SET status = ?, pages_processed = ?, processing_time = ?, completed_at = ?
             WHERE id = ?
-        """, (
-            'completed',
-            len(extraction_results['processed_pages']),
-            processing_time,
-            datetime.now(),
-            document_id
-        ))
+        """, ('completed', pages_processed, processing_time, datetime.now(), document_id))
         
         self.db_manager.connection.commit()
-        
-        return {
-            'success': True,
-            'document_id': document_id,
-            'metrics_extracted': len(extraction_results['metrics']),
-            'pages_processed': len(extraction_results['processed_pages']),
-            'insights_generated': len(insights),
-            'processing_time': processing_time,
-            'success_rate': extraction_results['success_rate']
-        }
     
-    def _update_document_status(self, document_id: int, status: str, error_message: str = None):
-        """Update document processing status"""
+    def _mark_document_failed(self, document_id: int, error: str):
+        """Mark document as failed"""
         cursor = self.db_manager.connection.cursor()
         cursor.execute("""
             UPDATE documents 
             SET status = ?, completed_at = ?
             WHERE id = ?
-        """, (status, datetime.now(), document_id))
-        
-        if error_message:
-            cursor.execute("""
-                INSERT INTO processing_logs (document_id, stage, message, level)
-                VALUES (?, ?, ?, ?)
-            """, (document_id, 'error', error_message, 'ERROR'))
+        """, ('failed', datetime.now(), document_id))
         
         self.db_manager.connection.commit()
     
-    def _extract_company_name(self, text: str) -> str:
-        """Extract company name from text"""
-        patterns = [
-            r'([A-Z][A-Za-z\s&\.]+(?:GROUP|PLC|INC|CORP|LIMITED|LTD|HOLDINGS|SA|AG|NV|LLC))',
-            r'ANNUAL\s*REPORT\s*(?:2024|2025|2023|2022)\s*(?:FOR|OF)\s*([A-Z][A-Za-z\s,&\.]+)',
-            r'([A-Z][A-Za-z\s&\.]+)\s*(?:ANNUAL|FINANCIAL)\s*REPORT'
-        ]
-        
-        for pattern in patterns:
-            matches = re.findall(pattern, text, re.IGNORECASE)
-            for match in matches:
-                name = match.strip()
-                name = re.sub(r'\s+', ' ', name)
-                if 3 <= len(name) <= 100 and not any(fp in name.upper() for fp in ['ANNUAL REPORT', 'FINANCIAL STATEMENTS']):
-                    return name
-        
-        return "Unknown Company"
-    
-    def _store_verified_metrics(self, document_id: int, verification_results: List, detected_industry: str):
-        """Store metrics with verification information"""
-        cursor = self.db_manager.connection.cursor()
-        
-        for result in verification_results:
-            # Store the main metric
-            cursor.execute("""
-                INSERT INTO financial_metrics 
-                (document_id, page_number, metric_name, metric_type, value, unit, 
-                period, confidence, extraction_method, source_text)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                document_id,
-                result.original_claim.evidence.page_number,
-                result.original_claim.metric_name,
-                self._classify_metric_type(result.original_claim.metric_name, detected_industry),
-                result.consensus_value or result.original_claim.value,
-                result.original_claim.unit,
-                result.original_claim.period,
-                result.confidence_score,
-                "dual_agent_verification",
-                result.original_claim.evidence.source_quote
-            ))
-            
-            metric_id = cursor.lastrowid
-            
-            # Store verification details
-            cursor.execute("""
-                INSERT INTO metric_verification 
-                (metric_id, verification_status, original_confidence, verification_confidence,
-                consensus_confidence, original_source_quote, verification_source_quote,
-                conflict_analysis, resolution_reasoning)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                metric_id,
-                result.status.value,
-                result.original_claim.evidence.confidence,
-                result.verification_claim.evidence.confidence if result.verification_claim else None,
-                result.confidence_score,
-                result.original_claim.evidence.source_quote,
-                result.verification_claim.evidence.source_quote if result.verification_claim else None,
-                result.conflict_analysis,
-                result.resolution_reasoning
-            ))
-        
-        self.db_manager.connection.commit()
-
-    def _get_verification_summary(self, document_id: int) -> Dict:
-        """Get verification summary for a document"""
-        cursor = self.db_manager.connection.cursor()
-        
-        cursor.execute("""
-            SELECT 
-                COUNT(CASE WHEN mv.verification_status = 'verified' THEN 1 END) as verified_count,
-                COUNT(CASE WHEN mv.verification_status = 'disputed' THEN 1 END) as disputed_count,
-                COUNT(*) as total_count
-            FROM financial_metrics fm
-            LEFT JOIN metric_verification mv ON fm.id = mv.metric_id
-            WHERE fm.document_id = ?
-        """, (document_id,))
-        
-        result = cursor.fetchone()
-        if result:
-            verified, disputed, total = result
-            return {
-                'verified_count': verified or 0,
-                'disputed_count': disputed or 0,
-                'total_count': total or 0,
-                'verification_rate': (verified or 0) / total if total > 0 else 0
-            }
-        
-        return {
-            'verified_count': 0,
-            'disputed_count': 0,
-            'total_count': 0,
-            'verification_rate': 0
-        }
-
-    def _convert_verification_to_metric(self, result: VerificationResult, document_id: int) -> Dict:
-        """Convert verification result to metric format for backward compatibility"""
-        return {
-            'metric': result.original_claim.metric_name,
-            'value': result.consensus_value or result.original_claim.value,
-            'unit': result.original_claim.unit,
-            'period': result.original_claim.period,
-            'confidence': result.confidence_score,
-            'page_number': result.original_claim.evidence.page_number,
-            'extraction_method': 'dual_agent_verification',
-            'verification_status': result.status.value,
-            'source_text': result.original_claim.evidence.source_quote,
-            'document_id': document_id
-        }
-
-    # Fix for document_processor.py - Replace the get_company_intelligence method
-
     def get_company_intelligence(self, document_id: int) -> Dict:
-        """Get comprehensive company intelligence"""
+        """Get company intelligence - simplified version"""
         cursor = self.db_manager.connection.cursor()
         
         try:
-            # Get basic document info
+            # Get document info
             cursor.execute("""
-                SELECT c.name, c.detected_industry, c.industry_confidence,
-                    d.filename, d.total_pages, d.pages_processed, d.processing_time, d.status
+                SELECT c.name, c.detected_industry, d.filename, d.total_pages, 
+                       d.pages_processed, d.processing_time, d.status
                 FROM companies c
                 JOIN documents d ON c.id = d.company_id
                 WHERE d.id = ?
@@ -877,68 +544,50 @@ class DocumentProcessor:
             if not doc_info:
                 return {'error': 'Document not found'}
             
-            # Get ALL metrics (with or without verification)
+            # Get all metrics with page information
             cursor.execute("""
-                SELECT fm.metric_name, fm.metric_type, fm.value, fm.unit, fm.period, 
-                    fm.confidence, mv.verification_status, mv.conflict_analysis
-                FROM financial_metrics fm
-                LEFT JOIN metric_verification mv ON fm.id = mv.metric_id
-                WHERE fm.document_id = ?
-                ORDER BY fm.confidence DESC
+                SELECT metric_name, value, unit, period, confidence, extraction_method, 
+                       page_number, source_text
+                FROM financial_metrics
+                WHERE document_id = ?
+                ORDER BY confidence DESC, page_number ASC
             """, (document_id,))
             
             metrics_data = cursor.fetchall()
             
             # Get insights
             cursor.execute("""
-                SELECT concept, insight_text, supporting_metrics, confidence
+                SELECT concept, insight_text, confidence
                 FROM business_intelligence
                 WHERE document_id = ?
-                ORDER BY confidence DESC
             """, (document_id,))
             
             insights_data = cursor.fetchall()
             
-            # Organize data
-            universal_metrics = {}
-            industry_metrics = {}
-            other_metrics = {}
-            verified_metrics = {}
-            disputed_metrics = {}
-            uncertain_metrics = {}
+            # Organize metrics by type
+            financial_metrics = {}
+            operational_metrics = {}
             
             for row in metrics_data:
+                (metric_name, value, unit, period, confidence, 
+                 method, page_number, source_text) = row
+                
                 metric_info = {
-                    'value': row[2],
-                    'unit': row[3],
-                    'period': row[4],
-                    'confidence': row[5],
-                    'verification_status': row[6] or 'unverified',  # Default to 'unverified'
-                    'notes': row[7]  # conflict_analysis
+                    'value': value,
+                    'unit': unit,
+                    'period': period,
+                    'confidence': confidence,
+                    'method': method,
+                    'extraction_method': method,  # For template compatibility
+                    'page_number': page_number,
+                    'source_text': source_text
                 }
                 
-                metric_name = row[0]
-                metric_type = row[1]
-                verification_status = row[6]
-                
-                # First categorize by type
-                if metric_type == 'universal':
-                    universal_metrics[metric_name] = metric_info
-                elif metric_type == 'industry_specific':
-                    industry_metrics[metric_name] = metric_info
+                # Simple categorization
+                if any(word in metric_name.lower() for word in ['revenue', 'income', 'profit', 'cost', 'cash', 'asset', 'liability', 'equity']):
+                    financial_metrics[metric_name] = metric_info
                 else:
-                    other_metrics[metric_name] = metric_info
-                
-                # Also categorize by verification status (if using dual-agent)
-                if verification_status == 'verified':
-                    verified_metrics[metric_name] = metric_info
-                elif verification_status == 'disputed':
-                    disputed_metrics[metric_name] = metric_info
-                elif verification_status == 'uncertain':
-                    uncertain_metrics[metric_name] = metric_info
-                else:
-                    # If no verification status, treat as verified for display
-                    verified_metrics[metric_name] = metric_info
+                    operational_metrics[metric_name] = metric_info
             
             # Format insights
             insights = []
@@ -946,72 +595,51 @@ class DocumentProcessor:
                 insights.append({
                     'concept': row[0],
                     'insight': row[1],
-                    'supporting_metrics': json.loads(row[2]) if row[2] else [],
-                    'confidence': row[3]
+                    'confidence': row[2]
                 })
-            
-            # Calculate verification summary
-            total_metrics = len(metrics_data)
-            verified_count = len([m for m in metrics_data if m[6] == 'verified' or m[6] is None])
-            disputed_count = len([m for m in metrics_data if m[6] == 'disputed'])
             
             return {
                 'company_profile': {
                     'name': doc_info[0],
                     'detected_industry': doc_info[1],
-                    'industry_confidence': doc_info[2],
-                    'filename': doc_info[3],
-                    'total_pages': doc_info[4],
-                    'pages_processed': doc_info[5],
-                    'processing_time': doc_info[6],
-                    'status': doc_info[7]
+                    'filename': doc_info[2],
+                    'total_pages': doc_info[3],
+                    'pages_processed': doc_info[4],
+                    'processing_time': doc_info[5],
+                    'status': doc_info[6]
                 },
-                'universal_metrics': universal_metrics,
-                'industry_specific_metrics': industry_metrics,
-                'other_metrics': other_metrics,
+                'financial_metrics': financial_metrics,
+                'operational_metrics': operational_metrics,
                 'business_intelligence': insights,
-                'verified_metrics': verified_metrics,
-                'disputed_metrics': disputed_metrics,
-                'uncertain_metrics': uncertain_metrics,
-                'verification_summary': {
-                    'verified_count': verified_count,
-                    'disputed_count': disputed_count,
-                    'total_count': total_metrics,
-                    'verification_rate': verified_count / total_metrics if total_metrics > 0 else 0
-                },
-                'coverage_analysis': {
-                    'total_metrics': total_metrics,
-                    'universal_coverage': len(universal_metrics),
-                    'industry_coverage': len(industry_metrics),
-                    'other_coverage': len(other_metrics)
+                'summary': {
+                    'total_metrics': len(metrics_data),
+                    'financial_metrics_count': len(financial_metrics),
+                    'operational_metrics_count': len(operational_metrics),
+                    'insights_count': len(insights)
                 }
             }
             
         except Exception as e:
-            print(f"Error in get_company_intelligence: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            print(f"Error getting intelligence: {e}")
             return {'error': f'Failed to get intelligence: {str(e)}'}
     
     def get_processing_progress(self, document_id: int) -> Dict:
-        """Get processing progress for a document"""
+        """Get processing progress"""
         cursor = self.db_manager.connection.cursor()
         
         try:
-            # Get document status
             cursor.execute("""
-                SELECT status, pages_processed, total_pages, processing_time
+                SELECT status, pages_processed, total_pages
                 FROM documents
                 WHERE id = ?
             """, (document_id,))
             
             result = cursor.fetchone()
             if not result:
-                return {'error': 'Document not found', 'status': 'not_found'}
+                return {'error': 'Document not found'}
             
-            status, pages_processed, total_pages, processing_time = result
+            status, pages_processed, total_pages = result
             
-            # Calculate progress percentage
             if status == 'completed':
                 progress = 100
             elif status == 'failed':
@@ -1019,48 +647,25 @@ class DocumentProcessor:
             elif pages_processed and total_pages:
                 progress = min(int((pages_processed / total_pages) * 100), 95)
             else:
-                progress = 10  # Initial progress
+                progress = 10
             
             return {
-                'document_id': document_id,
                 'status': status,
                 'progress': progress,
                 'pages_processed': pages_processed or 0,
-                'total_pages': total_pages or 0,
-                'processing_time': processing_time,
-                'message': self._get_status_message(status, progress)
+                'total_pages': total_pages or 0
             }
             
         except Exception as e:
-            return {'error': f'Failed to get progress: {str(e)}', 'status': 'error'}
-    
-    def _get_status_message(self, status: str, progress: int) -> str:
-        """Get human-readable status message"""
-        if status == 'completed':
-            return 'Analysis completed successfully'
-        elif status == 'failed':
-            return 'Analysis failed'
-        elif status == 'processing':
-            if progress < 20:
-                return 'Analyzing document structure...'
-            elif progress < 40:
-                return 'Detecting industry type...'
-            elif progress < 70:
-                return 'Extracting metrics...'
-            elif progress < 90:
-                return 'Generating insights...'
-            else:
-                return 'Finalizing analysis...'
-        else:
-            return 'Processing...'
+            return {'error': f'Progress check failed: {str(e)}'}
     
     def get_recent_analyses(self, limit: int = 6) -> List[Dict]:
-        """Get recent analyses for dashboard"""
+        """Get recent analyses"""
         cursor = self.db_manager.connection.cursor()
         
         try:
             cursor.execute("""
-                SELECT d.id, c.name, c.detected_industry, d.created_at, d.status,
+                SELECT d.id, c.name, c.detected_industry, d.created_at, 
                        COUNT(fm.id) as metric_count
                 FROM documents d
                 JOIN companies c ON d.company_id = c.id
@@ -1073,18 +678,13 @@ class DocumentProcessor:
             
             results = cursor.fetchall()
             
-            recent = []
-            for row in results:
-                recent.append({
-                    'id': row[0],
-                    'company': row[1],
-                    'industry': row[2] or 'Other',
-                    'date': row[3],
-                    'status': row[4],
-                    'metrics': row[5]
-                })
-            
-            return recent
+            return [{
+                'id': row[0],
+                'company': row[1],
+                'industry': row[2] or 'Other',
+                'date': row[3],
+                'metrics': row[4]
+            } for row in results]
             
         except Exception as e:
             print(f"Error getting recent analyses: {e}")

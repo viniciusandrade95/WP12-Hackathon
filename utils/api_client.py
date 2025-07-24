@@ -1,15 +1,17 @@
+# utils/api_client_fixed.py
 """
-Unified LLM API client for metric extraction - Python 3.7+ compatible
+FIXED API Client with robust JSON parsing and fallback handling
 """
 
 import requests
 import json
+import re
 import time
 from typing import Dict, List, Optional
 
 class LLMClient:
     """
-    Unified client for LLM API interactions
+    Fixed LLM client that actually works reliably
     """
     
     def __init__(self, api_key: str, base_url: str):
@@ -19,186 +21,280 @@ class LLMClient:
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
-        
-        # Default timeouts by complexity
-        self.timeouts = {
-            "simple": 60,
-            "complex": 120,
-            "industry": 90
-        }
     
     def extract_metrics(self, text: str, page_num: int, prompt: str, 
-                   timeout: int = 90, context: str = "general") -> List[Dict]:
+                       timeout: int = 90, context: str = "general") -> List[Dict]:
         """
-        Extract metrics using LLM with standardized response parsing
+        Extract metrics with robust error handling and parsing
         """
         try:
-            # Create system message based on context
-            system_message = self._create_system_message(context)
+            # Make API call
+            response = self._make_api_call(text, prompt, timeout)
+            if not response:
+                return []
             
-            # Prepare request
+            # Parse response with multiple strategies
+            metrics = self._parse_response_robust(response, page_num)
+            
+            print(f"        📊 API returned {len(metrics)} metrics")
+            return metrics
+            
+        except Exception as e:
+            print(f"        ❌ API call failed: {e}")
+            return []
+    
+    def _make_api_call(self, text: str, prompt: str, timeout: int) -> Optional[str]:
+        """Make the actual API call"""
+        try:
             data = {
                 "model": "mistral-small3.2:latest",
                 "messages": [
-                    {"role": "system", "content": system_message},
-                    {"role": "user", "content": f"{prompt}\n\nText:\n{text[:5000]}"}
+                    {
+                        "role": "system", 
+                        "content": "You are a precise financial data extractor. Return ONLY valid JSON arrays."
+                    },
+                    {
+                        "role": "user", 
+                        "content": f"{prompt}\n\nText to analyze:\n{text[:4000]}"
+                    }
                 ],
                 "temperature": 0.0,
-                "max_tokens": 3000,
-                "top_p": 0.1
+                "max_tokens": 2000
             }
             
-            # Make API call
             response = requests.post(
-                self.base_url, 
-                headers=self.headers, 
-                json=data, 
+                self.base_url,
+                headers=self.headers,
+                json=data,
                 timeout=timeout
             )
-            response.raise_for_status()
             
-            # Parse response
-            response_json = response.json()
-            content = response_json['choices'][0]['message']['content'].strip()
+            if response.status_code != 200:
+                print(f"        ❌ API error {response.status_code}: {response.text}")
+                return None
             
-            # Extract and parse JSON
-            metrics = self._parse_metrics_response(content, page_num)
+            result = response.json()
+            content = result['choices'][0]['message']['content'].strip()
             
-            return metrics
+            return content
             
         except requests.exceptions.Timeout:
-            print(f"    ⏰ LLM timeout for page {page_num}")
-            return []
-        except requests.exceptions.RequestException as e:
-            print(f"    ❌ API request failed for page {page_num}: {e}")
-            return []
-        except json.JSONDecodeError as e:
-            print(f"    ❌ JSON parsing failed for page {page_num}: {e}")
-            return []
-        except KeyError as e:
-            print(f"    ❌ Response format error for page {page_num}: {e}")
-            return []
+            print(f"        ⏰ API timeout after {timeout}s")
+            return None
         except Exception as e:
-            print(f"    ❌ Metric extraction failed for page {page_num}: {e}")
+            print(f"        ❌ API request failed: {e}")
+            return None
+    
+    def _parse_response_robust(self, content: str, page_num: int) -> List[Dict]:
+        """
+        Parse LLM response with multiple fallback strategies
+        """
+        if not content:
             return []
+        
+        # Strategy 1: Direct JSON array parsing
+        json_array = self._extract_json_array(content)
+        if json_array:
+            return self._convert_to_standard_format(json_array, page_num)
+        
+        # Strategy 2: Find JSON objects line by line
+        json_objects = self._extract_json_objects(content)
+        if json_objects:
+            return self._convert_to_standard_format(json_objects, page_num)
+        
+        # Strategy 3: Regex extraction from text
+        regex_metrics = self._extract_from_text_patterns(content, page_num)
+        if regex_metrics:
+            return regex_metrics
+        
+        print(f"        ⚠️ No valid data found in response")
+        return []
     
-    def _create_system_message(self, context: str) -> str:
-        """Create appropriate system message based on context"""
-        if context == "airlines":
-            return "You are an expert airline industry analyst. Focus on operational metrics, fleet data, and passenger statistics."
-        elif context == "banking":
-            return "You are an expert banking analyst. Focus on deposits, loans, branches, and capital metrics."
-        elif context == "technology":
-            return "You are an expert technology analyst. Focus on user metrics, recurring revenue, and growth indicators."
-
-        #### VERIFICATION BIT
-        elif context == "verification":
-            return "You are an independent verification agent. Rigorously challenge and verify metric claims. Be thorough and skeptical."
-            
-        else:
-            return "You are an expert financial analyst. Extract all relevant financial and operational metrics."
-    
-    # Fix 1: Update api_client.py to handle different response formats
-    # In api_client.py, update the _parse_metrics_response method:
-
-    def _parse_metrics_response(self, content: str, page_num: int) -> List[Dict]:
-        """
-        Parse LLM response with better error handling and format detection
-        """
+    def _extract_json_array(self, content: str) -> Optional[List[Dict]]:
+        """Try to extract JSON array from response"""
         try:
-            # Debug: Print what we're receiving
-            print(f"    🔍 Raw response length: {len(content)} chars")
-            print(f"    🔍 Response preview: {content[:200]}...")
+            # Find JSON array boundaries
+            start = content.find('[')
+            end = content.rfind(']')
             
-            # Try multiple JSON extraction strategies
-            metrics = []
+            if start == -1 or end == -1 or start >= end:
+                return None
             
-            # Strategy 1: Look for JSON array
-            json_start = content.find('[')
-            json_end = content.rfind(']')
+            json_str = content[start:end + 1]
             
-            if json_start != -1 and json_end != -1:
-                json_str = content[json_start:json_end + 1]
+            # Clean common issues
+            json_str = json_str.replace("'", '"')  # Single to double quotes
+            json_str = re.sub(r',\s*}', '}', json_str)  # Remove trailing commas in objects
+            json_str = re.sub(r',\s*]', ']', json_str)  # Remove trailing commas in arrays
+            
+            # Parse JSON
+            data = json.loads(json_str)
+            
+            if isinstance(data, list):
+                return data
+            elif isinstance(data, dict):
+                return [data]  # Single object to array
+            
+        except json.JSONDecodeError as e:
+            print(f"        ❌ JSON parsing failed: {e}")
+        except Exception as e:
+            print(f"        ❌ Array extraction failed: {e}")
+        
+        return None
+    
+    def _extract_json_objects(self, content: str) -> List[Dict]:
+        """Extract individual JSON objects from lines"""
+        objects = []
+        
+        lines = content.split('\n')
+        for line in lines:
+            line = line.strip()
+            
+            # Skip empty lines and non-JSON lines
+            if not line or not (line.startswith('{') and line.endswith('}')):
+                continue
+            
+            try:
+                # Clean the line
+                line = line.replace("'", '"')
+                line = re.sub(r',\s*}', '}', line)
+                
+                obj = json.loads(line)
+                if isinstance(obj, dict):
+                    objects.append(obj)
+                    
+            except json.JSONDecodeError:
+                continue
+        
+        return objects
+    
+    def _extract_from_text_patterns(self, content: str, page_num: int) -> List[Dict]:
+        """Extract metrics using regex patterns when JSON fails"""
+        metrics = []
+        
+        # Pattern 1: "Revenue: 13949 million EUR"
+        pattern1 = r'([A-Za-z\s]{3,40}):\s*([\d,]+(?:\.\d+)?)\s*(million|billion|thousand)?\s*(EUR|USD|GBP)?'
+        matches1 = re.findall(pattern1, content, re.IGNORECASE)
+        
+        for match in matches1:
+            try:
+                name = match[0].strip()
+                value = float(match[1].replace(',', ''))
+                scale = match[2].lower() if match[2] else ''
+                currency = match[3] if match[3] else 'EUR'
+                
+                # Apply scaling
+                if scale == 'billion':
+                    value *= 1000
+                elif scale == 'thousand':
+                    value /= 1000
+                
+                unit = f"{scale} {currency}" if scale else currency
+                
+                metrics.append({
+                    'name': name,
+                    'value': value,
+                    'unit': unit,
+                    'period': '2024'
+                })
+            except:
+                continue
+        
+        # Pattern 2: Look for numbers followed by descriptions
+        pattern2 = r'([\d,]+(?:\.\d+)?)\s*(million|billion)?\s*([A-Za-z\s]{3,40})'
+        matches2 = re.findall(pattern2, content, re.IGNORECASE)
+        
+        for match in matches2:
+            try:
+                value = float(match[0].replace(',', ''))
+                scale = match[1].lower() if match[1] else ''
+                name = match[2].strip()
+                
+                if scale == 'billion':
+                    value *= 1000
+                elif scale == 'thousand':
+                    value /= 1000
+                
+                unit = f"{scale} EUR" if scale else 'EUR'
+                
+                metrics.append({
+                    'name': name,
+                    'value': value,
+                    'unit': unit,
+                    'period': '2024'
+                })
+            except:
+                continue
+        
+        return metrics[:10]  # Limit to avoid spam
+    
+    def _convert_to_standard_format(self, data: List[Dict], page_num: int) -> List[Dict]:
+        """Convert various JSON formats to standard format"""
+        metrics = []
+        
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            
+            # Try different field name variations
+            name = (item.get('name') or 
+                   item.get('metric_name') or 
+                   item.get('metric') or 
+                   item.get('description', ''))
+            
+            value = (item.get('value') or 
+                    item.get('amount') or 
+                    item.get('number') or 0)
+            
+            # Handle string values
+            if isinstance(value, str):
+                # Remove currency symbols and commas
+                value_clean = re.sub(r'[€$£,]', '', value.strip())
                 try:
-                    data = json.loads(json_str)
-                    if isinstance(data, list):
-                        print(f"    ✅ Found JSON array with {len(data)} items")
-                    else:
-                        print(f"    ⚠️ JSON is not a list: {type(data)}")
-                        return []
-                except json.JSONDecodeError as e:
-                    print(f"    ❌ JSON parsing failed: {e}")
-                    # Try cleaning the JSON
-                    json_str = json_str.replace("'", '"')  # Replace single quotes
-                    json_str = re.sub(r',\s*}', '}', json_str)  # Remove trailing commas
-                    json_str = re.sub(r',\s*]', ']', json_str)
-                    try:
-                        data = json.loads(json_str)
-                        print(f"    ✅ Cleaned JSON parsed successfully")
-                    except:
-                        return []
-            else:
-                print(f"    ❌ No JSON array found in response")
-                # Strategy 2: Look for JSON objects separated by newlines
-                lines = content.strip().split('\n')
-                data = []
-                for line in lines:
-                    line = line.strip()
-                    if line.startswith('{') and line.endswith('}'):
-                        try:
-                            obj = json.loads(line)
-                            data.append(obj)
-                        except:
-                            pass
-                
-                if data:
-                    print(f"    ✅ Found {len(data)} JSON objects in lines")
+                    value = float(value_clean)
+                except ValueError:
+                    continue
             
-            # Process the data
-            for item in data:
-                if not isinstance(item, dict):
-                    continue
-                
-                # Be more flexible with field names
-                metric_name = (item.get("metric_name") or 
-                            item.get("metric") or 
-                            item.get("name") or "")
-                
-                value = (item.get("value") or 
-                        item.get("amount") or 
-                        item.get("number") or 0)
-                
-                # Try to convert string values to float
-                if isinstance(value, str):
-                    # Remove currency symbols and convert
-                    value = re.sub(r'[€$£,]', '', value)
-                    try:
-                        value = float(value)
-                    except:
-                        continue
-                
-                if not metric_name or not isinstance(value, (int, float)):
-                    continue
-                
-                metric = {
-                    "metric": metric_name,
-                    "value": float(value),
-                    "unit": str(item.get("unit", "unknown")),
-                    "period": str(item.get("period", "unknown")),
-                    "confidence": 0.90,
-                    "page_number": page_num,
-                    "extraction_method": "llm_extraction",
-                    "source_text": item.get("source_text", "")
-                }
-                
-                metrics.append(metric)
-                
-            print(f"    📊 Total metrics extracted: {len(metrics)}")
-            return metrics
+            # Skip invalid entries
+            if not name or not isinstance(value, (int, float)) or value == 0:
+                continue
+            
+            unit = str(item.get('unit', 'unknown'))
+            period = str(item.get('period', '2024'))
+            
+            metrics.append({
+                'name': name,
+                'value': float(value),
+                'unit': unit,
+                'period': period
+            })
+        
+        return metrics
+    
+    def test_extraction(self, sample_text: str) -> Dict:
+        """Test the extraction pipeline"""
+        print("🧪 Testing extraction pipeline...")
+        
+        test_prompt = """
+        Extract financial metrics from this text.
+        Return JSON array like: [{"name": "Revenue", "value": 1000, "unit": "million EUR", "period": "2024"}]
+        """
+        
+        try:
+            # Test API call
+            response = self._make_api_call(sample_text, test_prompt, 30)
+            if not response:
+                return {'status': 'api_failed', 'response': None}
+            
+            # Test parsing
+            metrics = self._parse_response_robust(response, 1)
+            
+            return {
+                'status': 'success',
+                'raw_response': response[:500],
+                'metrics_found': len(metrics),
+                'sample_metrics': metrics[:3]
+            }
             
         except Exception as e:
-            print(f"    ❌ Response parsing failed: {e}")
-            import traceback
-            traceback.print_exc()
-            return []
-
+            return {'status': 'error', 'error': str(e)}
